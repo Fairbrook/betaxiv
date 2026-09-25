@@ -93,6 +93,23 @@ npm run dist       # package an installer for the current OS (electron-builder)
 
 Requires Node 20+.
 
+### Troubleshooting: `Error: Electron uninstall`
+
+This means the Electron binary was never downloaded. That download normally happens in Electron's own install
+script. `npm install` now repairs it automatically (`scripts/ensure-electron.mjs`), so for an existing checkout run:
+
+```bash
+npm install            # or, directly: node node_modules/electron/install.js
+```
+
+Common causes, all handled by the repo now:
+- **pnpm 10+ / bun** skip dependency install scripts by default. `package.json` allows Electron's script
+  (`pnpm.onlyBuiltDependencies`, `trustedDependencies`), and the root postinstall repairs the binary either way.
+- **A failed optional download aborted the install.** `onnxruntime-node` tries to fetch optional GPU runtimes on
+  Linux and Windows; `.npmrc` sets `onnxruntime-node-install=skip` because betaxiv only uses the CPU build it
+  already ships.
+- **Behind a proxy or firewall**, set `ELECTRON_MIRROR` or the usual `HTTPS_PROXY` before `npm install`.
+
 ## Where data lives
 
 Everything is stored under the app's user-data folder (`BETAXIV_DATA_DIR` overrides it):

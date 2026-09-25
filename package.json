@@ -7,6 +7,7 @@
   "license": "MIT",
   "private": true,
   "scripts": {
+    "postinstall": "node scripts/ensure-electron.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
@@ -36,5 +37,15 @@
     "fast-xml-parser": "^5.11.1",
     "pdfjs-dist": "^5.7.284",
     "zod": "^4.6.5"
-  }
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
+  "trustedDependencies": [
+    "electron",
+    "esbuild"
+  ]
 }
