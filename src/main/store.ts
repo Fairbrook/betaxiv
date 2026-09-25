@@ -8,6 +8,8 @@ interface Library {
   version: 1
   lines: ResearchLine[]
   papers: Record<string, Paper>
+  /** Paper ids removed from each line, so fetching doesn't bring them back. */
+  dismissed?: Record<string, string[]>
 }
 
 /**
@@ -84,6 +86,7 @@ export class Store {
       }
     }
     fs.rmSync(this.chatFile(id), { force: true })
+    delete this.lib.dismissed?.[id]
     this.save()
   }
 
@@ -125,6 +128,32 @@ export class Store {
     if (patch.status && patch.status !== 'error') delete p.error
     this.save()
     return p
+  }
+
+  isDismissed(paperId: string, lineId: string): boolean {
+    return !!this.lib.dismissed?.[lineId]?.includes(paperId)
+  }
+
+  /**
+   * Take a paper out of a line and remember it as dismissed there. Once no line
+   * references it, it's deleted from the library and disk. Returns true if deleted.
+   */
+  removePaper(paperId: string, lineId: string): boolean {
+    const dismissed = (this.lib.dismissed ??= {})
+    const list = (dismissed[lineId] ??= [])
+    if (!list.includes(paperId)) list.push(paperId)
+    const p = this.lib.papers[paperId]
+    let deleted = false
+    if (p) {
+      p.lineIds = p.lineIds.filter((l) => l !== lineId)
+      if (p.lineIds.length === 0) {
+        delete this.lib.papers[paperId]
+        fs.rmSync(this.paperDir(paperId), { recursive: true, force: true })
+        deleted = true
+      }
+    }
+    this.save()
+    return deleted
   }
 
   // ---- chats ----------------------------------------------------------------

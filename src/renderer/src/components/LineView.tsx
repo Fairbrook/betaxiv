@@ -28,6 +28,14 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
     })
   }, [papers])
 
+  // Drop removed papers from the chat scope.
+  useEffect(() => {
+    setScope((s) => {
+      const kept = s.filter((id) => papers.some((p) => p.id === id))
+      return kept.length === s.length ? s : kept
+    })
+  }, [papers])
+
   useEffect(() => {
     reload()
     const offPapers = api.onPapersChanged((id) => id === line.id && reload())
@@ -40,6 +48,7 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
 
   const running = progress?.running ?? false
   const indexed = papers.filter((p) => p.status === 'indexed').length
+  const inReview = papers.filter((p) => p.status === 'review').length
   const unfinished = papers.filter(
     (p) =>
       p.status === 'pending' ||
@@ -122,7 +131,7 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
           )}
           <span className="spacer" />
           <span className="muted small">
-            {papers.length} papers · {indexed} indexed
+            {papers.length - inReview} papers · {indexed} indexed{inReview ? ` · ${inReview} to review` : ''}
           </span>
         </div>
         {progress && (
@@ -151,7 +160,7 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
             </button>
           </div>
           {tab === 'papers' ? (
-            <PaperList lineId={line.id} papers={papers} scope={scope} setScope={setScope} busy={running} />
+            <PaperList lineId={line.id} papers={papers} scope={scope} setScope={setScope} busy={running} runJob={runJob} />
           ) : (
             <EntityMap
               lineId={line.id}

@@ -15,7 +15,11 @@ export interface ResearchLine {
   createdAt: string
 }
 
-export type PaperStatus = 'pending' | 'downloading' | 'extracting' | 'indexing' | 'indexed' | 'error'
+/**
+ * 'review' = fetched, waiting for you to approve it before anything is downloaded or indexed.
+ * 'pending' = approved, not processed yet.
+ */
+export type PaperStatus = 'review' | 'pending' | 'downloading' | 'extracting' | 'indexing' | 'indexed' | 'error'
 
 export interface Paper {
   /** arXiv identifier without version suffix, e.g. 2401.01234 or hep-th/9901001. */
@@ -162,6 +166,10 @@ export interface BetaxivApi {
   fetchNewPapers(lineId: string, n: number): Promise<FetchResult>
   processPending(lineId: string): Promise<void>
   reindexPaper(lineId: string, paperId: string): Promise<void>
+  /** Approve papers awaiting review: they're downloaded, indexed and mapped like before. */
+  approvePapers(lineId: string, paperIds: string[]): Promise<void>
+  /** Remove papers from a line (also used to discard ones awaiting review); later fetches skip them. */
+  removePapers(lineId: string, paperIds: string[]): Promise<void>
   cancelJob(lineId: string): Promise<void>
   openPdf(paperId: string): Promise<void>
   openExternal(url: string): Promise<void>

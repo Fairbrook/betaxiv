@@ -30,6 +30,10 @@ const MAX_SCAN = 2000
 
 export class Pipeline {
   private jobs = new Map<string, AbortController>()
+  /** Papers still to process in a line's running job; approving more appends here. */
+  private queues = new Map<string, string[]>()
+  /** Paper each line's job is working on right now. */
+  private current = new Map<string, string>()
 
   constructor(
     private store: Store,
@@ -71,7 +75,8 @@ export class Pipeline {
   /**
    * Search arXiv for the line's keywords and add `n` papers that aren't in the
    * library yet, paging further through the results whenever the ones found are
-   * already known. Then download, extract and index each new paper.
+   * already known. New papers wait in 'review' until approved; nothing is
+   * downloaded or indexed yet.
    */
   fetchNew(lineId: string, n: number): Promise<FetchResult> {
     return this.run(lineId, async (signal) => {
@@ -79,7 +84,6 @@ export class Pipeline {
       const query = buildSearchQuery(line)
       const pageSize = Math.min(100, Math.max(25, n * 2))
       const result: FetchResult = { added: 0, linked: 0, skipped: 0, exhausted: false }
-      const newIds: string[] = []
       let start = 0
 
       while (result.added < n) {
@@ -87,15 +91,18 @@ export class Pipeline {
         const page = await searchArxiv(query, start, pageSize, line.sortBy, signal)
         for (const entry of page.entries) {
           if (result.added >= n) break
+          if (this.store.isDismissed(entry.id, lineId)) {
+            result.skipped++
+            continue
+          }
           if (this.store.hasPaper(entry.id)) {
             // Already in the system: don't count it, but make sure it's part of this line.
             if (this.store.linkPaper(entry.id, lineId)) result.linked++
             else result.skipped++
             continue
           }
-          const paper: Paper = { ...entry, addedAt: new Date().toISOString(), lineIds: [lineId], status: 'pending' }
+          const paper: Paper = { ...entry, addedAt: new Date().toISOString(), lineIds: [lineId], status: 'review' }
           this.store.addPaper(paper)
-          newIds.push(paper.id)
           result.added++
         }
         this.events.papersChanged(lineId)
@@ -107,10 +114,9 @@ export class Pipeline {
         if (result.added < n) await sleep(ARXIV_DELAY_MS, signal)
       }
 
-      await this.processPapers(lineId, newIds, signal)
-      const parts = [`Added ${result.added} new paper${result.added === 1 ? '' : 's'}`]
+      const parts = [`Added ${result.added} new paper${result.added === 1 ? '' : 's'} to review`]
       if (result.linked) parts.push(`linked ${result.linked} already in your library`)
-      if (result.skipped) parts.push(`skipped ${result.skipped} already in this line`)
+      if (result.skipped) parts.push(`skipped ${result.skipped} already in or removed from this line`)
       if (result.exhausted) parts.push('no more matching results on arXiv')
       this.emit(lineId, 'done', parts.join(', '))
       return result
@@ -126,7 +132,7 @@ export class Pipeline {
         .papersForLine(lineId)
         .filter(
           (p) =>
-            p.status !== 'indexed' ||
+            (p.status !== 'indexed' && p.status !== 'review') ||
             p.embeddingModel !== model ||
             (settings.extractEntities && (p.entities === undefined || !!p.entitiesError))
         )
@@ -145,21 +151,77 @@ export class Pipeline {
     })
   }
 
-  private async processPapers(lineId: string, ids: string[], signal: AbortSignal): Promise<void> {
-    for (let i = 0; i < ids.length; i++) {
-      signal.throwIfAborted()
-      const paper = this.store.getPaper(ids[i])
-      const label = `[${i + 1}/${ids.length}] ${paper.title}`
-      try {
-        await this.processPaper(lineId, paper, label, i, ids.length, signal)
-      } catch (err) {
-        if (signal.aborted) {
-          this.store.updatePaper(paper.id, { status: 'pending' })
-          throw err
-        }
-        this.store.updatePaper(paper.id, { status: 'error', error: (err as Error).message })
+  /**
+   * Approve papers awaiting review. If the line is already processing papers they
+   * join its queue; otherwise a new job downloads and indexes them.
+   */
+  async approve(lineId: string, paperIds: string[]): Promise<void> {
+    const ids = paperIds.filter((id) => this.store.hasPaper(id) && this.store.getPaper(id).status === 'review')
+    for (const id of ids) this.store.updatePaper(id, { status: 'pending' })
+    this.events.papersChanged(lineId)
+    if (ids.length === 0) return
+    const queue = this.queues.get(lineId)
+    if (queue) {
+      queue.push(...ids)
+      return
+    }
+    // A fetch is still running: the papers stay pending for "Process unfinished".
+    if (this.jobs.has(lineId)) return
+    await this.run(lineId, async (signal) => {
+      await this.processPapers(lineId, ids, signal)
+      this.emit(lineId, 'done', `Processed ${ids.length} approved paper${ids.length === 1 ? '' : 's'}`)
+    })
+  }
+
+  /** Remove papers from a line (see Store.removePaper). */
+  remove(lineId: string, paperIds: string[]): void {
+    const busy = new Set(this.current.values())
+    for (const id of paperIds) {
+      const p = this.store.hasPaper(id) ? this.store.getPaper(id) : undefined
+      // Only refuse when the files would be deleted from under the running job.
+      if (busy.has(id) && p && p.lineIds.length <= 1) {
+        throw new Error(`"${p.title}" is being processed right now; cancel the job first`)
       }
-      this.events.papersChanged(lineId)
+    }
+    for (const id of paperIds) {
+      const queue = this.queues.get(lineId)
+      if (queue?.includes(id)) queue.splice(queue.indexOf(id), 1)
+      if (this.store.removePaper(id, lineId)) {
+        for (const q of this.queues.values()) if (q.includes(id)) q.splice(q.indexOf(id), 1)
+        forgetIndex(id)
+      }
+    }
+    this.events.papersChanged(lineId)
+  }
+
+  private async processPapers(lineId: string, ids: string[], signal: AbortSignal): Promise<void> {
+    const queue = [...ids]
+    this.queues.set(lineId, queue)
+    let done = 0
+    try {
+      while (queue.length) {
+        signal.throwIfAborted()
+        const id = queue.shift()!
+        if (!this.store.hasPaper(id)) continue
+        const paper = this.store.getPaper(id)
+        const total = done + queue.length + 1
+        const label = `[${done + 1}/${total}] ${paper.title}`
+        this.current.set(lineId, id)
+        try {
+          await this.processPaper(lineId, paper, label, done, total, signal)
+        } catch (err) {
+          if (signal.aborted) {
+            this.store.updatePaper(paper.id, { status: 'pending' })
+            throw err
+          }
+          this.store.updatePaper(paper.id, { status: 'error', error: (err as Error).message })
+        }
+        done++
+        this.events.papersChanged(lineId)
+      }
+    } finally {
+      this.queues.delete(lineId)
+      this.current.delete(lineId)
     }
   }
 
