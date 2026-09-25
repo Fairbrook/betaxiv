@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import type { Settings } from '../shared/types'
 
 export interface LlmTurn {
@@ -48,6 +49,29 @@ type AgentSdk = typeof import('@anthropic-ai/claude-agent-sdk')
 let sdkPromise: Promise<AgentSdk> | null = null
 const loadSdk = () => (sdkPromise ??= import('@anthropic-ai/claude-agent-sdk'))
 
+/**
+ * In a packaged app the SDK resolves its native Claude Code binary to a path inside
+ * app.asar, which can't be executed (spawn ENOTDIR). electron-builder unpacks it to
+ * app.asar.unpacked (see asarUnpack), so point the SDK there. Returns undefined in
+ * development, where the SDK's own lookup works.
+ */
+function packagedClaudeExecutable(): string | undefined {
+  if (!__dirname.includes('app.asar')) return undefined
+  const ext = process.platform === 'win32' ? '.exe' : ''
+  const variants =
+    process.platform === 'linux' ? [`linux-${process.arch}`, `linux-${process.arch}-musl`] : [`${process.platform}-${process.arch}`]
+  for (const v of variants) {
+    try {
+      const resolved = require.resolve(`@anthropic-ai/claude-agent-sdk-${v}/claude${ext}`)
+      const unpacked = resolved.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1')
+      if (fs.existsSync(unpacked)) return unpacked
+    } catch {
+      // Variant not installed for this platform.
+    }
+  }
+  return undefined
+}
+
 /** Render prior turns into the single prompt the Agent SDK takes. */
 function transcriptPrompt(messages: LlmTurn[]): string {
   if (messages.length === 1) return messages[0].content
@@ -84,7 +108,8 @@ async function claudeCode(s: Settings, req: LlmRequest, cwd: string): Promise<st
       includePartialMessages: true,
       cwd,
       env,
-      abortController
+      abortController,
+      pathToClaudeCodeExecutable: packagedClaudeExecutable()
     }
   })
   for await (const msg of q) {
