@@ -89,6 +89,7 @@ npm run dev        # start the app with hot reload
 npm test           # unit tests (arXiv parsing, text processing, chunking, retrieval)
 npm run typecheck
 npm run dist       # package an installer for the current OS (electron-builder)
+npm run dist:linux # build dist/betaxiv-<version>.AppImage
 ```
 
 Requires Node 20+.
@@ -109,6 +110,26 @@ Common causes, all handled by the repo now:
   Linux and Windows; `.npmrc` sets `onnxruntime-node-install=skip` because betaxiv only uses the CPU build it
   already ships.
 - **Behind a proxy or firewall**, set `ELECTRON_MIRROR` or the usual `HTTPS_PROXY` before `npm install`.
+
+## Installing on Linux (AppImage)
+
+```bash
+npm run dist:linux       # builds dist/betaxiv-<version>.AppImage
+npm run install:linux    # copies it to ~/.local/share/betaxiv and adds an app-launcher entry
+sh scripts/install-appimage.sh --uninstall   # removes it (your library is kept)
+```
+
+The AppImage is built with electron-builder's **new AppImage toolset** (`toolsets.appimage: 1.0.3`), which uses
+the statically linked [type2-runtime](https://github.com/AppImage/type2-runtime). It **doesn't need the deprecated
+`libfuse2`**:
+- If `fusermount3` is present (from the `fuse3` package, which most distros install by default), the AppImage mounts
+  itself as usual.
+- If there is no FUSE at all, it extracts itself to a temporary folder and runs from there, so it still starts, just
+  more slowly.
+
+The Linux build leaves out binaries it can never use (the musl build of the Claude Code binary, and onnxruntime's
+macOS/Windows libraries), which keeps the AppImage around 330 MB. The native Claude Code binary and onnxruntime are
+unpacked from `app.asar` so they can run.
 
 ## Where data lives
 

@@ -19,3 +19,18 @@ win:
 linux:
   target: AppImage
   category: Education
+  # Window app_id/WM_CLASS = desktopName from package.json, so docks match it to the launcher.
+  syncDesktopName: true
+  files:
+    # AppImages need glibc, so the musl build of the Claude binary is dead weight (~230 MB).
+    - '!node_modules/@anthropic-ai/claude-agent-sdk-linux-*-musl{,/**}'
+    # onnxruntime-node ships binaries for every OS; keep only Linux's.
+    - '!node_modules/onnxruntime-node/bin/napi-v*/{darwin,win32}{,/**}'
+appImage:
+  # zstd decompresses fastest at startup (supported by the new runtime only).
+  compression: zstd
+# Use the new AppImage toolset (appimagetool + the static type2-runtime). Unlike the
+# legacy runtime it doesn't dynamically link libfuse2, so the AppImage runs on
+# modern distros without installing the deprecated libfuse2 package.
+toolsets:
+  appimage: '1.0.3'
