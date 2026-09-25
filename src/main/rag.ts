@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { embed } from './embeddings'
+import { collectionOverview } from './entities'
 import { complete, type LlmTurn } from './llm'
 import { hybridSearch, type IndexedChunk } from './retrieval'
 import { embeddingKey } from './settings'
@@ -87,6 +88,7 @@ Guidelines:
 - Ground every claim in the excerpts and cite them inline with their numbers in square brackets, e.g. [2] or [1][4].
 - When several papers are relevant, compare and synthesise them rather than summarising each in isolation.
 - If the excerpts don't contain enough information to answer, say so clearly, then give the best answer you can and mark which parts are not supported by the excerpts.
+- The collection overview (one-line summaries and key entities per paper) is for orientation; cite claims from the numbered excerpts where possible, and refer to papers by title when you rely only on the overview.
 - Use Markdown for structure. Use LaTeX ($...$) for math when helpful.`
 
 function formatContext(sources: SourceChunk[]): string {
@@ -141,9 +143,13 @@ export async function ask(o: AskOptions): Promise<{ answer: string; sources: Sou
     .filter((m) => !m.error)
     .slice(-6)
     .map((m) => ({ role: m.role, content: m.content }))
+  // The entity map gives the model a cheap bird's-eye view for cross-paper questions.
+  const overview = papers.some((p) => p.entities?.length)
+    ? `<collection_overview>\n${collectionOverview(papers)}\n</collection_overview>\n\n`
+    : ''
   turns.push({
     role: 'user',
-    content: `${scopeNote}\n\n<excerpts>\n${formatContext(sources)}\n</excerpts>\n\nQuestion: ${o.question}`
+    content: `${scopeNote}\n\n${overview}<excerpts>\n${formatContext(sources)}\n</excerpts>\n\nQuestion: ${o.question}`
   })
 
   const answer = await complete(settings, { system: SYSTEM_PROMPT, messages: turns, onToken: o.onToken, signal: o.signal }, o.workDir)

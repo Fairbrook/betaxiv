@@ -9,6 +9,29 @@ export const DEFAULT_LLM_MODELS: Record<LlmProvider, string> = {
   ollama: 'llama3.1'
 }
 
+/** Cheaper model used for entity extraction ('' = reuse the answer model). */
+export const DEFAULT_ENTITY_MODELS: Record<LlmProvider, string> = {
+  'claude-code': 'haiku',
+  anthropic: 'claude-haiku-4-5',
+  gemini: '',
+  openai: '',
+  ollama: ''
+}
+
+/** Quick-switch choices shown next to the chat box. */
+export const QUICK_MODELS: Partial<Record<LlmProvider, { value: string; label: string }[]>> = {
+  'claude-code': [
+    { value: 'haiku', label: 'Haiku (fewest tokens)' },
+    { value: 'sonnet', label: 'Sonnet' },
+    { value: 'opus', label: 'Opus (most capable)' }
+  ],
+  anthropic: [
+    { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+    { value: 'claude-sonnet-5', label: 'Sonnet 5' },
+    { value: 'claude-opus-5-5', label: 'Opus 5.5' }
+  ]
+}
+
 export const DEFAULT_EMBEDDING_MODELS: Record<EmbeddingProvider, string> = {
   // 512-token context; small enough to run on CPU.
   local: 'Xenova/bge-small-en-v1.5',
@@ -33,6 +56,7 @@ export const RECOMMENDED_CHUNKING: Record<EmbeddingProvider, { chunkSize: number
 export const DEFAULT_SETTINGS: Settings = {
   llmProvider: 'claude-code',
   llmModel: DEFAULT_LLM_MODELS['claude-code'],
+  entityModel: DEFAULT_ENTITY_MODELS['claude-code'],
   embeddingProvider: 'local',
   embeddingModel: DEFAULT_EMBEDDING_MODELS.local,
   apiKeys: { openai: '', gemini: '', anthropic: '' },
@@ -40,5 +64,6 @@ export const DEFAULT_SETTINGS: Settings = {
   ollamaUrl: 'http://localhost:11434',
   ...RECOMMENDED_CHUNKING.local,
   topK: 10,
-  stripReferences: true
+  stripReferences: true,
+  extractEntities: true
 }

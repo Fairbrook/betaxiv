@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { buildSearchQuery } from './arxiv'
 import { setModelCacheDir } from './embeddings'
 import { Pipeline } from './pipeline'
+import { buildLineMap } from './entities'
 import { complete } from './llm'
 import { ask } from './rag'
 import { getSettings, initSettings, saveSettings } from './settings'
@@ -55,7 +56,7 @@ app.whenReady().then(() => {
   const pipeline = new Pipeline(store, {
     progress: (p) => send('job:progress', p),
     papersChanged: (lineId) => send('papers:changed', lineId)
-  })
+  }, workDir)
   const chatAborts = new Map<string, AbortController>()
 
   ipcMain.handle('settings:get', () => getSettings())
@@ -99,6 +100,7 @@ app.whenReady().then(() => {
   ipcMain.handle('shell:openExternal', (_e, url: string) => {
     if (/^https:\/\/(arxiv\.org|export\.arxiv\.org)\//.test(url)) return shell.openExternal(url)
   })
+  ipcMain.handle('lines:map', (_e, lineId: string) => buildLineMap(store.papersForLine(lineId)))
   ipcMain.handle('papers:text', (_e, paperId: string) => {
     try {
       return fs.readFileSync(path.join(store.paperDir(paperId), 'paper.md'), 'utf8')

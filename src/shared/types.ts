@@ -38,6 +38,30 @@ export interface Paper {
   chunkCount?: number
   /** `${provider}:${model}` the stored embeddings were built with. */
   embeddingModel?: string
+  /** One-sentence contribution summary from the entity-map step. */
+  tldr?: string
+  /** Key entities from the title/abstract/introduction (undefined = not extracted yet). */
+  entities?: PaperEntity[]
+  /** Why entity extraction failed (the paper is still searchable). */
+  entitiesError?: string
+}
+
+export type EntityType = 'task' | 'method' | 'model' | 'dataset' | 'metric' | 'concept'
+/** How the paper relates to the entity. */
+export type EntityRole = 'proposes' | 'uses' | 'evaluates-on' | 'compares-to' | 'discusses'
+
+export interface PaperEntity {
+  name: string
+  type: EntityType
+  role: EntityRole
+}
+
+/** An entity merged across the papers of a research line. */
+export interface LineEntity {
+  key: string
+  name: string
+  type: EntityType
+  papers: { paperId: string; role: EntityRole }[]
 }
 
 /**
@@ -51,6 +75,8 @@ export type EmbeddingProvider = 'local' | 'openai' | 'gemini' | 'ollama'
 export interface Settings {
   llmProvider: LlmProvider
   llmModel: string
+  /** Model for the per-paper entity map; empty = same as llmModel. A small model keeps it cheap. */
+  entityModel: string
   embeddingProvider: EmbeddingProvider
   embeddingModel: string
   apiKeys: { openai: string; gemini: string; anthropic: string }
@@ -64,6 +90,8 @@ export interface Settings {
   topK: number
   /** Drop the references section from extracted text before indexing. */
   stripReferences: boolean
+  /** Build the per-paper entity map (one LLM call per paper). */
+  extractEntities: boolean
 }
 
 export interface SourceChunk {
@@ -87,7 +115,7 @@ export interface ChatMessage {
   error?: boolean
 }
 
-export type JobStage = 'searching' | 'downloading' | 'extracting' | 'indexing' | 'done' | 'error'
+export type JobStage = 'searching' | 'downloading' | 'extracting' | 'indexing' | 'mapping' | 'done' | 'error'
 
 export interface JobProgress {
   lineId: string
@@ -138,6 +166,7 @@ export interface BetaxivApi {
   openPdf(paperId: string): Promise<void>
   openExternal(url: string): Promise<void>
   getPaperText(paperId: string): Promise<string>
+  lineMap(lineId: string): Promise<LineEntity[]>
 
   chatHistory(lineId: string): Promise<ChatMessage[]>
   ask(lineId: string, question: string, paperIds: string[], requestId: string): Promise<ChatMessage>

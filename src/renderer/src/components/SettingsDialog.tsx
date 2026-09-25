@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { EmbeddingProvider, LlmProvider, Settings } from '@shared/types'
-import { DEFAULT_EMBEDDING_MODELS, DEFAULT_LLM_MODELS, RECOMMENDED_CHUNKING } from '@shared/defaults'
+import { DEFAULT_EMBEDDING_MODELS, DEFAULT_ENTITY_MODELS, DEFAULT_LLM_MODELS, RECOMMENDED_CHUNKING } from '@shared/defaults'
 import { api } from '../api'
 import { cleanError } from './LineView'
 import Modal from './Modal'
@@ -66,7 +66,7 @@ export default function SettingsDialog(props: { onClose: () => void }) {
           value={s.llmProvider}
           onChange={(e) => {
             const p = e.target.value as LlmProvider
-            set({ llmProvider: p, llmModel: DEFAULT_LLM_MODELS[p] })
+            set({ llmProvider: p, llmModel: DEFAULT_LLM_MODELS[p], entityModel: DEFAULT_ENTITY_MODELS[p] })
           }}
         >
           {Object.entries(LLM_LABELS).map(([k, v]) => (
@@ -119,6 +119,23 @@ export default function SettingsDialog(props: { onClose: () => void }) {
         </button>
         {test && <span className={test.ok ? 'ok-text small' : 'error-text small'}>{test.ok ? `✓ ${test.text}` : test.text}</span>}
       </div>
+
+      <h3>Entity map</h3>
+      <label className="check">
+        <input type="checkbox" checked={s.extractEntities} onChange={(e) => set({ extractEntities: e.target.checked })} />
+        Extract key methods, datasets, metrics… from each paper (one call per paper, abstract + introduction only)
+      </label>
+      {s.extractEntities && (
+        <label className="field" style={{ marginTop: 10 }}>
+          <span>Model for entity extraction</span>
+          <input
+            value={s.entityModel}
+            placeholder={`same as answers (${s.llmModel})`}
+            onChange={(e) => set({ entityModel: e.target.value })}
+          />
+          <small className="muted">A small model is plenty here — Haiku keeps token use low.</small>
+        </label>
+      )}
 
       <h3>Embeddings</h3>
       <label className="field">

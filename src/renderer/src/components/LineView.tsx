@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { JobProgress, Paper, ResearchLine } from '@shared/types'
 import { api } from '../api'
 import ChatPanel from './ChatPanel'
+import EntityMap from './EntityMap'
 import PaperList from './PaperList'
 
 export const cleanError = (e: unknown) =>
@@ -14,11 +15,17 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
   const [count, setCount] = useState(5)
   const [scope, setScope] = useState<string[]>([])
   const [embeddingModel, setEmbeddingModel] = useState('')
+  const [extractEntities, setExtractEntities] = useState(false)
+  const [tab, setTab] = useState<'papers' | 'map'>('papers')
+  const [draft, setDraft] = useState<{ text: string; nonce: number } | null>(null)
 
   const reload = useCallback(() => api.listPapers(line.id).then(setPapers), [line.id])
 
   useEffect(() => {
-    api.getSettings().then((s) => setEmbeddingModel(`${s.embeddingProvider}:${s.embeddingModel}`))
+    api.getSettings().then((s) => {
+      setEmbeddingModel(`${s.embeddingProvider}:${s.embeddingModel}`)
+      setExtractEntities(s.extractEntities)
+    })
   }, [papers])
 
   useEffect(() => {
@@ -37,7 +44,8 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
     (p) =>
       p.status === 'pending' ||
       p.status === 'error' ||
-      (p.status === 'indexed' && embeddingModel && p.embeddingModel !== embeddingModel)
+      (p.status === 'indexed' && embeddingModel && p.embeddingModel !== embeddingModel) ||
+      (p.status === 'indexed' && extractEntities && (p.entities === undefined || !!p.entitiesError))
   ).length
 
   const runJob = async (fn: () => Promise<unknown>) => {
@@ -133,8 +141,30 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
       </section>
 
       <div className="split">
-        <PaperList lineId={line.id} papers={papers} scope={scope} setScope={setScope} busy={running} />
-        <ChatPanel line={line} papers={papers} scope={scope} setScope={setScope} />
+        <div className="left-pane">
+          <div className="tabs">
+            <button className={tab === 'papers' ? 'active' : ''} onClick={() => setTab('papers')}>
+              Papers
+            </button>
+            <button className={tab === 'map' ? 'active' : ''} onClick={() => setTab('map')}>
+              Entity map
+            </button>
+          </div>
+          {tab === 'papers' ? (
+            <PaperList lineId={line.id} papers={papers} scope={scope} setScope={setScope} busy={running} />
+          ) : (
+            <EntityMap
+              lineId={line.id}
+              papers={papers}
+              onSelectPapers={setScope}
+              onAsk={(ids, question) => {
+                setScope(ids)
+                setDraft({ text: question, nonce: Date.now() })
+              }}
+            />
+          )}
+        </div>
+        <ChatPanel line={line} papers={papers} scope={scope} setScope={setScope} draft={draft} />
       </div>
     </div>
   )

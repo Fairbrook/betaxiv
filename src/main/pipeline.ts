@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { ARXIV_DELAY_MS, buildSearchQuery, searchArxiv } from './arxiv'
 import { downloadPdf, pdfToText } from './pdf'
+import { ENTITY_SYSTEM_PROMPT, entityPromptInput, parseEntityReply } from './entities'
+import { complete } from './llm'
 import { forgetIndex, indexPaper } from './rag'
 import { embeddingKey, getSettings } from './settings'
 import type { Store } from './store'
@@ -21,6 +23,8 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     })
   })
 
+const ENTITY_TIMEOUT_MS = 180_000
+
 // Safety cap on how deep we page through arXiv results looking for new papers.
 const MAX_SCAN = 2000
 
@@ -29,7 +33,9 @@ export class Pipeline {
 
   constructor(
     private store: Store,
-    private events: PipelineEvents
+    private events: PipelineEvents,
+    /** Working directory for the Claude Agent SDK. */
+    private workDir: string
   ) {}
 
   isRunning(lineId: string): boolean {
@@ -114,10 +120,16 @@ export class Pipeline {
   /** Retry everything in the line that isn't indexed with the current embedding model. */
   processPending(lineId: string): Promise<void> {
     return this.run(lineId, async (signal) => {
-      const model = embeddingKey(getSettings())
+      const settings = getSettings()
+      const model = embeddingKey(settings)
       const ids = this.store
         .papersForLine(lineId)
-        .filter((p) => p.status !== 'indexed' || p.embeddingModel !== model)
+        .filter(
+          (p) =>
+            p.status !== 'indexed' ||
+            p.embeddingModel !== model ||
+            (settings.extractEntities && (p.entities === undefined || !!p.entitiesError))
+        )
         .map((p) => p.id)
       await this.processPapers(lineId, ids, signal)
       this.emit(lineId, 'done', ids.length ? `Processed ${ids.length} paper${ids.length === 1 ? '' : 's'}` : 'Nothing to process')
@@ -126,6 +138,8 @@ export class Pipeline {
 
   reindex(lineId: string, paperId: string): Promise<void> {
     return this.run(lineId, async (signal) => {
+      // A manual re-index also refreshes the entity map.
+      this.store.updatePaper(paperId, { status: 'pending', entities: undefined, tldr: undefined, entitiesError: undefined })
       await this.processPapers(lineId, [paperId], signal)
       this.emit(lineId, 'done', 'Re-indexed paper')
     })
@@ -175,17 +189,48 @@ export class Pipeline {
       fs.writeFileSync(mdPath, header + text)
     }
 
-    this.store.updatePaper(paper.id, { status: 'indexing' })
-    this.events.papersChanged(lineId)
-    this.emit(lineId, 'indexing', `Embedding ${label}`, i, total)
-    forgetIndex(paper.id)
-    const count = await indexPaper(
-      this.store,
-      settings,
-      paper,
-      (done, all) => this.emit(lineId, 'indexing', `Embedding ${label} (${done}/${all} chunks)`, i, total),
-      signal
-    )
-    this.store.updatePaper(paper.id, { status: 'indexed', chunkCount: count, embeddingModel: embeddingKey(settings) })
+    const current = this.store.getPaper(paper.id)
+    if (current.status !== 'indexed' || current.embeddingModel !== embeddingKey(settings)) {
+      this.store.updatePaper(paper.id, { status: 'indexing' })
+      this.events.papersChanged(lineId)
+      this.emit(lineId, 'indexing', `Embedding ${label}`, i, total)
+      forgetIndex(paper.id)
+      const count = await indexPaper(
+        this.store,
+        settings,
+        paper,
+        (done, all) => this.emit(lineId, 'indexing', `Embedding ${label} (${done}/${all} chunks)`, i, total),
+        signal
+      )
+      this.store.updatePaper(paper.id, { status: 'indexed', chunkCount: count, embeddingModel: embeddingKey(settings) })
+    }
+
+    const latest = this.store.getPaper(paper.id)
+    if (settings.extractEntities && (latest.entities === undefined || latest.entitiesError)) {
+      this.events.papersChanged(lineId)
+      this.emit(lineId, 'mapping', `Mapping entities ${label}`, i, total)
+      const timeout = AbortSignal.timeout(ENTITY_TIMEOUT_MS)
+      try {
+        const text = fs.readFileSync(mdPath, 'utf8')
+        const reply = await complete(
+          { ...settings, llmModel: settings.entityModel || settings.llmModel },
+          {
+            system: ENTITY_SYSTEM_PROMPT,
+            messages: [{ role: 'user', content: entityPromptInput(paper, text) }],
+            onToken: () => {},
+            // One stuck call must not stall the whole job.
+            signal: AbortSignal.any([signal, timeout])
+          },
+          this.workDir
+        )
+        const { tldr, entities } = parseEntityReply(reply)
+        this.store.updatePaper(paper.id, { tldr, entities, entitiesError: undefined })
+      } catch (err) {
+        if (signal.aborted) throw err
+        if (timeout.aborted) err = new Error('Entity extraction timed out')
+        // Non-fatal: the paper stays searchable, the map just lacks it.
+        this.store.updatePaper(paper.id, { entitiesError: (err as Error).message })
+      }
+    }
   }
 }

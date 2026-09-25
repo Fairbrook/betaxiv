@@ -25,6 +25,26 @@ rewritten in TypeScript so it runs inside the app, with no Python server to star
    retrieved excerpts go to the LLM with a prompt adapted from alphaxiv-open, and the answer streams in with `[n]`
    citations you can click to see the excerpt.
 
+## Entity map
+
+After a paper is indexed, one extra LLM call reads only its title, abstract and introduction. It returns a
+one-sentence TL;DR and 5–20 key entities (tasks, methods, models, datasets, metrics, concepts), each tagged with how
+the paper relates to it: proposes, uses, evaluates on, compares to, or discusses.
+
+- **Per paper:** the TL;DR and entity chips appear when you expand a paper. Entities the paper proposes are
+  highlighted.
+- **Per research line:** the **Entity map** tab merges the entities across all papers, so "RAG" and
+  "Retrieval-Augmented Generation (RAG)" count as one. The most shared entities come first, and you can filter by
+  type. Click an entity to see which papers use it and in what role. "Ask about these papers" limits the chat to those
+  papers and suggests a comparison question.
+- **In answers:** each question also sends the TL;DRs and entity lists of the papers in scope, which helps with
+  cross-paper comparisons.
+
+This is a lightweight take on MiniRAG/LightRAG's knowledge graph. Those extract entities from every chunk, which
+costs many LLM calls per paper; betaxiv makes one. By default the step uses **Haiku** to save tokens. You can change
+the model or turn the step off in Settings → Entity map. If a call fails or takes longer than 3 minutes, only that
+paper's map is skipped (the paper stays searchable), and **Process unfinished** retries it.
+
 ## Answers on your Claude plan
 
 The default answer provider is **Claude via the [Claude Agent SDK](https://docs.claude.com/en/api/agent-sdk/overview)**,
@@ -37,6 +57,9 @@ One-time setup:
 npm install -g @anthropic-ai/claude-code   # if you don't have Claude Code yet
 claude                                     # then run /login and sign in with your Claude account
 ```
+
+Use the model switch next to the **Ask** button to change between **Haiku** (fewest tokens), **Sonnet** and
+**Opus** at any time. The choice is saved.
 
 Alternatively, run `claude setup-token` and paste the token into **Settings → Answers**.
 `ANTHROPIC_API_KEY` is removed from the SDK's environment so the subscription login is always used. The SDK runs
@@ -95,6 +118,7 @@ src/main/        Electron main process
   textproc.ts      text clean-up, reference stripping, chunking
   embeddings.ts    local / OpenAI / Gemini / Ollama embeddings
   retrieval.ts     cosine + BM25 hybrid search (RRF)
+  entities.ts      per-paper entity extraction + line-wide entity map
   rag.ts           indexing and question answering
   llm.ts           Claude Agent SDK, Anthropic, Gemini, OpenAI, Ollama streaming
   pipeline.ts      fetch-until-N-new → download → extract → index jobs
@@ -107,5 +131,5 @@ src/renderer/    React UI
 
 - One desktop app. There is no FastAPI backend, MiniRAG server, or Next.js frontend to run.
 - It works on a collection of papers rather than one paper at a time.
-- Retrieval is vector + BM25 hybrid search. It does not build MiniRAG's LLM-extracted knowledge graph, which would
-  cost several LLM calls per paper.
+- Retrieval is vector + BM25 hybrid search. Instead of MiniRAG's knowledge graph, which makes LLM calls on every
+  chunk, betaxiv builds a cheap entity map with one call per paper (see above).

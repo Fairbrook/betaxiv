@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import type { ChatMessage, Paper, ResearchLine, SourceChunk } from '@shared/types'
+import type { ChatMessage, Paper, ResearchLine, Settings, SourceChunk } from '@shared/types'
+import { QUICK_MODELS } from '@shared/defaults'
 import { api, newId } from '../api'
 import { cleanError } from './LineView'
 
@@ -83,11 +84,32 @@ export default function ChatPanel(props: {
   papers: Paper[]
   scope: string[]
   setScope: (s: string[]) => void
+  /** Question to prefill in the composer (e.g. from the entity map). */
+  draft?: { text: string; nonce: number } | null
 }) {
   const [history, setHistory] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [pending, setPending] = useState<{ requestId: string; question: string; text: string } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [settings, setSettings] = useState<Settings | null>(null)
+
+  useEffect(() => {
+    api.getSettings().then(setSettings)
+  }, [])
+
+  useEffect(() => {
+    if (!props.draft) return
+    setInput(props.draft.text)
+    inputRef.current?.focus()
+  }, [props.draft?.nonce])
+
+  const quickModels = settings ? QUICK_MODELS[settings.llmProvider] : undefined
+  const switchModel = async (llmModel: string) => {
+    // Re-read so we don't overwrite changes made in the Settings dialog meanwhile.
+    const latest = await api.getSettings()
+    setSettings(await api.saveSettings({ ...latest, llmModel }))
+  }
 
   useEffect(() => {
     api.chatHistory(props.line.id).then(setHistory)
@@ -187,6 +209,7 @@ export default function ChatPanel(props: {
 
       <div className="composer">
         <textarea
+          ref={inputRef}
           rows={2}
           value={input}
           placeholder={indexed.length ? 'Ask a question… (Enter to send, Shift+Enter for newline)' : 'Fetch and index some papers first'}
@@ -199,6 +222,22 @@ export default function ChatPanel(props: {
             }
           }}
         />
+        {quickModels && settings && (
+          <select
+            className="model-switch"
+            title="Model used for answers"
+            value={settings.llmModel}
+            disabled={!!pending}
+            onChange={(e) => switchModel(e.target.value)}
+          >
+            {!quickModels.some((m) => m.value === settings.llmModel) && <option value={settings.llmModel}>{settings.llmModel}</option>}
+            {quickModels.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        )}
         {pending ? (
           <button className="btn" onClick={() => api.stopAnswer(pending.requestId)}>
             Stop

@@ -26,6 +26,7 @@ const api: BetaxivApi = {
   openPdf: (paperId) => ipcRenderer.invoke('papers:openPdf', paperId),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   getPaperText: (paperId) => ipcRenderer.invoke('papers:text', paperId),
+  lineMap: (lineId) => ipcRenderer.invoke('lines:map', lineId),
 
   chatHistory: (lineId) => ipcRenderer.invoke('chat:history', lineId),
   ask: (lineId, question, paperIds, requestId) => ipcRenderer.invoke('chat:ask', lineId, question, paperIds, requestId),

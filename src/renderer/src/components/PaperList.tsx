@@ -78,6 +78,21 @@ export default function PaperList(props: {
               {expanded && (
                 <div className="paper-detail">
                   {p.error && <p className="error-text small">{p.error}</p>}
+                  {p.tldr && (
+                    <p className="tldr">
+                      <strong>TL;DR</strong> {p.tldr}
+                    </p>
+                  )}
+                  {p.entities && p.entities.length > 0 && (
+                    <div className="paper-entities">
+                      {p.entities.map((e) => (
+                        <span key={e.name} className={`chip entity-chip ${e.role}`} title={`${e.type} · ${e.role}`}>
+                          {e.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {p.entitiesError && <p className="muted small">Entity map failed: {p.entitiesError}</p>}
                   <p className="abstract">{p.abstract}</p>
                   <div className="paper-cats">
                     {p.categories.map((c) => (
