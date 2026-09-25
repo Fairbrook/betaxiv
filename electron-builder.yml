@@ -1,0 +1,21 @@
+appId: com.fairbrook.betaxiv
+productName: betaxiv
+directories:
+  buildResources: build
+files:
+  - out/**
+  - package.json
+# Native binaries can't be loaded from inside the asar archive.
+asarUnpack:
+  - node_modules/@anthropic-ai/**
+  - node_modules/onnxruntime-node/**
+  - node_modules/sharp/**
+  - node_modules/@img/**
+mac:
+  target: dmg
+  category: public.app-category.education
+win:
+  target: nsis
+linux:
+  target: AppImage
+  category: Education
