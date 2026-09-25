@@ -1,0 +1,40 @@
+{
+  "name": "betaxiv",
+  "version": "0.1.0",
+  "description": "Desktop research assistant: track arXiv research lines, ingest full-text papers, and chat with them via RAG.",
+  "main": "out/main/index.js",
+  "author": "fairbrook",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "node --import tsx --test test/*.test.ts",
+    "dist": "electron-vite build && electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "dompurify": "^3.4.16",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "marked": "^18.0.14",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.282",
+    "@huggingface/transformers": "^4.3.0",
+    "fast-xml-parser": "^5.11.1",
+    "pdfjs-dist": "^5.7.284",
+    "zod": "^4.6.5"
+  }
+}
