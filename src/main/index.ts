@@ -91,6 +91,8 @@ app.whenReady().then(() => {
   )
   ipcMain.handle('papers:processPending', (_e, lineId: string) => pipeline.processPending(lineId))
   ipcMain.handle('papers:reindex', (_e, lineId: string, paperId: string) => pipeline.reindex(lineId, paperId))
+  ipcMain.handle('papers:approve', (_e, lineId: string, paperIds: string[]) => pipeline.approve(lineId, paperIds))
+  ipcMain.handle('papers:remove', (_e, lineId: string, paperIds: string[]) => pipeline.remove(lineId, paperIds))
   ipcMain.handle('job:cancel', (_e, lineId: string) => pipeline.cancel(lineId))
   ipcMain.handle('papers:openPdf', async (_e, paperId: string) => {
     const file = path.join(store.paperDir(paperId), 'paper.pdf')

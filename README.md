@@ -15,11 +15,16 @@ rewritten in TypeScript so it runs inside the app, with no Python server to star
    library are skipped: they don't count toward N, and a paper that another line already has is linked to this line
    too. Paging continues until N new papers are added or arXiv runs out of results. Requests are spaced 3 seconds
    apart, as arXiv asks.
-3. **Download the full text.** Each paper's PDF is saved locally.
-4. **Build the RAG index** (alphaxiv-open pipeline):
+3. **Review.** New papers land in **Awaiting review** with only their title, authors and abstract; nothing is
+   downloaded, indexed or sent to an LLM yet. **Approve** the useful ones (or **Approve all**) and they continue
+   through the steps below. If a job is already running, approved papers join its queue. **Discard** drops a paper,
+   and later fetches skip it. Any paper can also be removed with **Delete** in its expanded view: its files and index
+   are deleted unless another line still uses it.
+4. **Download the full text.** Each paper's PDF is saved locally.
+5. **Build the RAG index** (alphaxiv-open pipeline):
    PDF → text (alphaxiv-open uses markitdown, betaxiv uses pdf.js) → clean-up (hyphenation, wrapped lines, ligatures,
    optional removal of the references section) → overlapping chunks → embeddings.
-5. **Ask questions** across the whole line, or tick specific papers to narrow the scope. Retrieval is hybrid: dense
+6. **Ask questions** across the whole line, or tick specific papers to narrow the scope. Retrieval is hybrid: dense
    vectors plus BM25 keyword scores, merged with reciprocal rank fusion and capped per paper so one paper can't fill
    every slot. alphaxiv-open does the same job with MiniRAG's `hybrid` mode and falls back to keyword search. The
    retrieved excerpts go to the LLM with a prompt adapted from alphaxiv-open, and the answer streams in with `[n]`
