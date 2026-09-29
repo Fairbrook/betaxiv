@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { JobProgress, Paper, ResearchLine } from '@shared/types'
 import { api } from '../api'
+import AddPaperDialog from './AddPaperDialog'
 import ChatPanel from './ChatPanel'
 import EntityMap from './EntityMap'
 import PaperList from './PaperList'
@@ -18,6 +19,7 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
   const [extractEntities, setExtractEntities] = useState(false)
   const [tab, setTab] = useState<'papers' | 'map'>('papers')
   const [draft, setDraft] = useState<{ text: string; nonce: number } | null>(null)
+  const [adding, setAdding] = useState(false)
 
   const reload = useCallback(() => api.listPapers(line.id).then(setPapers), [line.id])
 
@@ -119,6 +121,9 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
           <button className="btn primary" disabled={running} onClick={() => runJob(() => api.fetchNewPapers(line.id, count))}>
             Fetch from arXiv
           </button>
+          <button className="btn" onClick={() => setAdding(true)} title="Add a paper by arXiv link or PDF file">
+            Add paper…
+          </button>
           {unfinished > 0 && !running && (
             <button className="btn" onClick={() => runJob(() => api.processPending(line.id))}>
               Process {unfinished} unfinished
@@ -175,6 +180,18 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
         </div>
         <ChatPanel line={line} papers={papers} scope={scope} setScope={setScope} draft={draft} />
       </div>
+      {adding && (
+        <AddPaperDialog
+          lineId={line.id}
+          onClose={() => setAdding(false)}
+          onAdded={(message) => {
+            setAdding(false)
+            reload()
+            // Don't hide the progress of a job the add just started (or joined).
+            setProgress((p) => (p?.running ? p : { lineId: line.id, stage: 'done', message, running: false }))
+          }}
+        />
+      )}
     </div>
   )
 }

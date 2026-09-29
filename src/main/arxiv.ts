@@ -108,3 +108,46 @@ export async function searchArxiv(
   if (!res.ok) throw new Error(`arXiv API returned HTTP ${res.status}`)
   return parseAtom(await res.text())
 }
+
+// New-style ids (2401.01234, 0704.0001) and old-style ones (hep-th/9901001, math.GT/0309136).
+const NEW_ID = /(\d{4}\.\d{4,5})(v\d+)?/
+const OLD_ID = /([a-z-]+(?:\.[A-Z]{2})?\/\d{7})(v\d+)?/
+
+/**
+ * Pull an arXiv id out of whatever the user pasted: a bare id, "arXiv:2401.01234v2",
+ * or an abs/pdf/html link on arxiv.org (or a mirror such as alphaxiv.org).
+ */
+export function parseArxivRef(raw: string): { id: string; version?: string } | null {
+  const s = raw.trim().replace(/^arxiv:\s*/i, '')
+  if (!s) return null
+  let text = s
+  if (/^https?:\/\//i.test(s)) {
+    // In a URL, only look at the path so query strings can't masquerade as ids.
+    try {
+      text = new URL(s).pathname.replace(/^\/(abs|pdf|html|overview)\//, '').replace(/\.pdf$/i, '').replace(/\/$/, '')
+    } catch {
+      return null
+    }
+  }
+  const anchored = (re: RegExp) => new RegExp(`^${re.source}$`)
+  const m = text.match(anchored(NEW_ID)) ?? text.match(anchored(OLD_ID))
+  if (!m) return null
+  return m[2] ? { id: m[1], version: m[2] } : { id: m[1] }
+}
+
+/** Find the arXiv id stamped on a paper's first page ("arXiv:2401.01234v2 [cs.CL] 5 Jan 2024"). */
+export function findArxivIdInText(text: string): string | null {
+  const m = text.match(new RegExp(`arXiv:\\s*(?:${NEW_ID.source}|${OLD_ID.source})`))
+  return m ? (m[1] ?? m[3]) : null
+}
+
+/** Look up one paper's metadata by id. */
+export async function fetchArxivEntry(id: string, signal?: AbortSignal): Promise<ArxivEntry> {
+  const params = new URLSearchParams({ id_list: id, max_results: '1' })
+  const res = await fetch(`${API_URL}?${params}`, { headers: { 'User-Agent': USER_AGENT }, signal })
+  if (!res.ok) throw new Error(`arXiv API returned HTTP ${res.status}`)
+  const entry = parseAtom(await res.text()).entries.find((e) => e.id === id)
+  // Unknown ids come back as an empty entry without a title.
+  if (!entry || !entry.title) throw new Error(`arXiv has no paper with id ${id}`)
+  return entry
+}

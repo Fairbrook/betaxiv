@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildSearchQuery, parseAtom, splitArxivId } from '../src/main/arxiv'
+import { buildSearchQuery, findArxivIdInText, parseArxivRef, parseAtom, splitArxivId } from '../src/main/arxiv'
 
 test('buildSearchQuery quotes phrases and joins with the match mode', () => {
   assert.equal(
@@ -56,4 +56,23 @@ test('parseAtom extracts entries', () => {
 test('parseAtom surfaces API errors', () => {
   const xml = `<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/api/errors#bad</id><summary>malformed query</summary></entry></feed>`
   assert.throws(() => parseAtom(xml), /malformed query/)
+})
+
+test('parseArxivRef accepts ids, arXiv: prefixes and links', () => {
+  assert.deepEqual(parseArxivRef('2401.01234'), { id: '2401.01234' })
+  assert.deepEqual(parseArxivRef(' arXiv:2401.01234v2 '), { id: '2401.01234', version: 'v2' })
+  assert.deepEqual(parseArxivRef('https://arxiv.org/abs/2401.01234v3'), { id: '2401.01234', version: 'v3' })
+  assert.deepEqual(parseArxivRef('https://arxiv.org/pdf/2401.01234.pdf'), { id: '2401.01234' })
+  assert.deepEqual(parseArxivRef('https://www.alphaxiv.org/abs/2401.01234'), { id: '2401.01234' })
+  assert.deepEqual(parseArxivRef('https://arxiv.org/abs/hep-th/9901001'), { id: 'hep-th/9901001' })
+  assert.deepEqual(parseArxivRef('math.GT/0309136v1'), { id: 'math.GT/0309136', version: 'v1' })
+  assert.equal(parseArxivRef('https://example.com/?id=2401.01234'), null)
+  assert.equal(parseArxivRef('not a paper'), null)
+  assert.equal(parseArxivRef(''), null)
+})
+
+test('findArxivIdInText spots the arXiv stamp on a first page', () => {
+  assert.equal(findArxivIdInText('Title arXiv:2401.01234v2 [cs.CL] 5 Jan 2024 Abstract'), '2401.01234')
+  assert.equal(findArxivIdInText('arXiv:hep-th/9901001v1 12 Jan 1999'), 'hep-th/9901001')
+  assert.equal(findArxivIdInText('No stamp here, see 2401.01234 in the references.'), null)
 })

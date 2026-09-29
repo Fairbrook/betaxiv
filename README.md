@@ -20,6 +20,15 @@ rewritten in TypeScript so it runs inside the app, with no Python server to star
    through the steps below. If a job is already running, approved papers join its queue. **Discard** drops a paper,
    and later fetches skip it. Any paper can also be removed with **Delete** in its expanded view: its files and index
    are deleted unless another line still uses it.
+   **Add paper…** adds a single paper by hand, skipping review:
+   - paste an arXiv link or id (`https://arxiv.org/abs/2401.01234`, `arXiv:2401.01234v2`, `2401.01234`, or an
+     alphaxiv.org link). Its metadata comes from the arXiv API.
+   - or choose a PDF file, from arXiv or anywhere else. The title and authors are guessed from the file and can be
+     edited; the abstract is taken from the extracted text. If the first page carries an arXiv stamp, you can use that
+     paper's arXiv metadata instead, and it then counts as the same paper as an arXiv fetch would.
+
+   A paper that's already in your library is linked to the line instead of added twice, and adding a paper you
+   discarded earlier brings it back.
 4. **Download the full text.** Each paper's PDF is saved locally.
 5. **Build the RAG index** (alphaxiv-open pipeline):
    PDF → text (alphaxiv-open uses markitdown, betaxiv uses pdf.js) → clean-up (hyphenation, wrapped lines, ligatures,

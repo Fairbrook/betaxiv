@@ -1,13 +1,15 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { ARXIV_DELAY_MS, buildSearchQuery, searchArxiv } from './arxiv'
+import { createHash } from 'node:crypto'
+import { ARXIV_DELAY_MS, buildSearchQuery, fetchArxivEntry, parseArxivRef, searchArxiv, type ArxivEntry } from './arxiv'
 import { downloadPdf, pdfToText } from './pdf'
 import { ENTITY_SYSTEM_PROMPT, entityPromptInput, parseEntityReply } from './entities'
 import { complete } from './llm'
 import { forgetIndex, indexPaper } from './rag'
 import { embeddingKey, getSettings } from './settings'
+import { guessAbstract } from './textproc'
 import type { Store } from './store'
-import type { FetchResult, JobProgress, Paper } from '../shared/types'
+import type { AddPaperResult, AddPdfInput, FetchResult, JobProgress, Paper } from '../shared/types'
 
 export interface PipelineEvents {
   progress(p: JobProgress): void
@@ -159,18 +161,116 @@ export class Pipeline {
     const ids = paperIds.filter((id) => this.store.hasPaper(id) && this.store.getPaper(id).status === 'review')
     for (const id of ids) this.store.updatePaper(id, { status: 'pending' })
     this.events.papersChanged(lineId)
+    await this.enqueue(lineId, ids, 'approved')
+  }
+
+  /**
+   * Process pending papers: they join the line's running queue if there is one,
+   * otherwise a new job starts. While a fetch runs they stay pending for "Process unfinished".
+   */
+  private async enqueue(lineId: string, ids: string[], what: string): Promise<void> {
     if (ids.length === 0) return
     const queue = this.queues.get(lineId)
     if (queue) {
-      queue.push(...ids)
+      queue.push(...ids.filter((id) => !queue.includes(id)))
       return
     }
-    // A fetch is still running: the papers stay pending for "Process unfinished".
     if (this.jobs.has(lineId)) return
     await this.run(lineId, async (signal) => {
       await this.processPapers(lineId, ids, signal)
-      this.emit(lineId, 'done', `Processed ${ids.length} approved paper${ids.length === 1 ? '' : 's'}`)
+      this.emit(lineId, 'done', `Processed ${ids.length} ${what} paper${ids.length === 1 ? '' : 's'}`)
     })
+  }
+
+  /** Start processing without waiting for it; failures show up as job progress. */
+  private kick(lineId: string, ids: string[]) {
+    this.enqueue(lineId, ids, 'added').catch(() => {})
+  }
+
+  /**
+   * Put a paper that's already in the library into this line (a manual add
+   * overrides an earlier discard) and approve it if it was still awaiting review.
+   */
+  private attachExisting(lineId: string, paperId: string): AddPaperResult {
+    this.store.undismiss(paperId, lineId)
+    const linked = this.store.linkPaper(paperId, lineId)
+    const p = this.store.getPaper(paperId)
+    if (p.status === 'review') {
+      this.store.updatePaper(paperId, { status: 'pending' })
+      this.kick(lineId, [paperId])
+    }
+    this.events.papersChanged(lineId)
+    return { paperId, title: p.title, outcome: linked ? 'linked' : 'exists' }
+  }
+
+  private addEntry(lineId: string, entry: ArxivEntry, extra?: Partial<Paper>): Paper {
+    const paper: Paper = { ...entry, ...extra, addedAt: new Date().toISOString(), lineIds: [lineId], status: 'pending' }
+    this.store.undismiss(paper.id, lineId)
+    this.store.addPaper(paper)
+    return paper
+  }
+
+  /** Add a paper by arXiv link or id. Manually added papers skip review. */
+  async addArxiv(lineId: string, ref: string): Promise<AddPaperResult> {
+    this.store.getLine(lineId)
+    const parsed = parseArxivRef(ref)
+    if (!parsed) throw new Error('Not an arXiv link or id (expected something like 2401.01234 or https://arxiv.org/abs/2401.01234)')
+    if (this.store.hasPaper(parsed.id)) return this.attachExisting(lineId, parsed.id)
+    const entry = await fetchArxivEntry(parsed.id, AbortSignal.timeout(30_000))
+    // Race: it may have been added while we were waiting on arXiv.
+    if (this.store.hasPaper(entry.id)) return this.attachExisting(lineId, entry.id)
+    const paper = this.addEntry(lineId, entry)
+    this.events.papersChanged(lineId)
+    this.kick(lineId, [paper.id])
+    return { paperId: paper.id, title: paper.title, outcome: 'added' }
+  }
+
+  /**
+   * Import a local PDF. With an arXiv id its metadata comes from arXiv (and it
+   * dedupes against arXiv fetches); otherwise it's stored as local-<hash>.
+   */
+  async addPdf(lineId: string, input: AddPdfInput): Promise<AddPaperResult> {
+    this.store.getLine(lineId)
+    const data = fs.readFileSync(input.path)
+    if (data.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error('That file is not a PDF')
+
+    let paper: Paper
+    if (input.arxivId) {
+      const parsed = parseArxivRef(input.arxivId)
+      if (!parsed) throw new Error(`Invalid arXiv id ${input.arxivId}`)
+      if (this.store.hasPaper(parsed.id)) return this.attachExisting(lineId, parsed.id)
+      const entry = await fetchArxivEntry(parsed.id, AbortSignal.timeout(30_000))
+      if (this.store.hasPaper(entry.id)) return this.attachExisting(lineId, entry.id)
+      fs.mkdirSync(this.store.paperDir(entry.id), { recursive: true })
+      fs.writeFileSync(path.join(this.store.paperDir(entry.id), 'paper.pdf'), data)
+      paper = this.addEntry(lineId, entry)
+    } else {
+      const id = `local-${createHash('sha256').update(data).digest('hex').slice(0, 16)}`
+      if (this.store.hasPaper(id)) return this.attachExisting(lineId, id)
+      const title = input.title.replace(/\s+/g, ' ').trim() || path.basename(input.path).replace(/\.pdf$/i, '')
+      const now = new Date().toISOString()
+      fs.mkdirSync(this.store.paperDir(id), { recursive: true })
+      fs.writeFileSync(path.join(this.store.paperDir(id), 'paper.pdf'), data)
+      paper = this.addEntry(
+        lineId,
+        {
+          id,
+          version: '',
+          title,
+          authors: input.authors.map((a) => a.trim()).filter(Boolean),
+          abstract: '',
+          published: now,
+          updated: now,
+          categories: [],
+          absUrl: '',
+          pdfUrl: ''
+        },
+        { source: 'local' }
+      )
+    }
+    this.events.papersChanged(lineId)
+    this.kick(lineId, [paper.id])
+    return { paperId: paper.id, title: paper.title, outcome: 'added' }
   }
 
   /** Remove papers from a line (see Store.removePaper). */
@@ -233,6 +333,7 @@ export class Pipeline {
     const mdPath = path.join(dir, 'paper.md')
 
     if (!fs.existsSync(pdfPath)) {
+      if (!paper.pdfUrl) throw new Error('The imported PDF file is missing; delete the paper and add it again')
       this.store.updatePaper(paper.id, { status: 'downloading' })
       this.events.papersChanged(lineId)
       this.emit(lineId, 'downloading', `Downloading full text ${label}`, i, total)
@@ -247,8 +348,11 @@ export class Pipeline {
       this.emit(lineId, 'extracting', `Extracting text ${label}`, i, total)
       const text = await pdfToText(new Uint8Array(fs.readFileSync(pdfPath)), { stripReferences: settings.stripReferences })
       if (text.length < 500) throw new Error('Could not extract meaningful text from the PDF (scanned document?)')
-      const header = `# ${paper.title}\n\n${paper.authors.join(', ')}\n\narXiv:${paper.id}${paper.version} — ${paper.absUrl}\n\n`
+      const source = paper.source === 'local' ? 'Imported PDF' : `arXiv:${paper.id}${paper.version} — ${paper.absUrl}`
+      const header = `# ${paper.title}\n\n${paper.authors.join(', ')}\n\n${source}\n\n`
       fs.writeFileSync(mdPath, header + text)
+      // Imported PDFs have no abstract until we find one in the text (the entity map and review use it).
+      if (!paper.abstract) paper = this.store.updatePaper(paper.id, { abstract: guessAbstract(text) })
     }
 
     const current = this.store.getPaper(paper.id)

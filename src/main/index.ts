@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -7,10 +7,11 @@ import { setModelCacheDir } from './embeddings'
 import { Pipeline } from './pipeline'
 import { buildLineMap } from './entities'
 import { complete } from './llm'
+import { inspectPdf } from './pdf'
 import { ask } from './rag'
 import { getSettings, initSettings, saveSettings } from './settings'
 import { Store } from './store'
-import type { ChatMessage, NewLineInput, ResearchLine, Settings } from '../shared/types'
+import type { AddPdfInput, ChatMessage, NewLineInput, PdfCandidate, ResearchLine, Settings } from '../shared/types'
 
 let win: BrowserWindow | null = null
 
@@ -93,11 +94,31 @@ app.whenReady().then(() => {
   ipcMain.handle('papers:reindex', (_e, lineId: string, paperId: string) => pipeline.reindex(lineId, paperId))
   ipcMain.handle('papers:approve', (_e, lineId: string, paperIds: string[]) => pipeline.approve(lineId, paperIds))
   ipcMain.handle('papers:remove', (_e, lineId: string, paperIds: string[]) => pipeline.remove(lineId, paperIds))
+  ipcMain.handle('papers:addArxiv', (_e, lineId: string, ref: string) => pipeline.addArxiv(lineId, String(ref)))
+  // Only files the user picked in the dialog below can be imported.
+  const pickedPdfs = new Set<string>()
+  ipcMain.handle('papers:pickPdf', async (): Promise<PdfCandidate | null> => {
+    const opts = { title: 'Add a paper PDF', properties: ['openFile' as const], filters: [{ name: 'PDF', extensions: ['pdf'] }] }
+    const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    const file = res.filePaths[0]
+    if (res.canceled || !file) return null
+    const data = new Uint8Array(fs.readFileSync(file))
+    if (new TextDecoder().decode(data.slice(0, 5)) !== '%PDF-') throw new Error('That file is not a PDF')
+    const info = await inspectPdf(data).catch(() => ({ title: '', authors: [], arxivId: null }))
+    pickedPdfs.add(file)
+    return { path: file, fileName: path.basename(file), ...info }
+  })
+  ipcMain.handle('papers:addPdf', async (_e, lineId: string, input: AddPdfInput) => {
+    if (!pickedPdfs.has(input.path)) throw new Error('Pick the PDF again')
+    const result = await pipeline.addPdf(lineId, input)
+    pickedPdfs.delete(input.path)
+    return result
+  })
   ipcMain.handle('job:cancel', (_e, lineId: string) => pipeline.cancel(lineId))
   ipcMain.handle('papers:openPdf', async (_e, paperId: string) => {
     const file = path.join(store.paperDir(paperId), 'paper.pdf')
     if (fs.existsSync(file)) await shell.openPath(file)
-    else await shell.openExternal(store.getPaper(paperId).pdfUrl)
+    else if (store.getPaper(paperId).pdfUrl) await shell.openExternal(store.getPaper(paperId).pdfUrl)
   })
   ipcMain.handle('shell:openExternal', (_e, url: string) => {
     if (/^https:\/\/(arxiv\.org|export\.arxiv\.org)\//.test(url)) return shell.openExternal(url)

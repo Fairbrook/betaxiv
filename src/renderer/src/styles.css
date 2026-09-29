@@ -101,6 +101,10 @@ code {
   display: grid;
   grid-template-columns: 250px 1fr;
   height: 100%;
+  transition: grid-template-columns 0.15s ease;
+}
+.app.sidebar-collapsed {
+  grid-template-columns: 56px 1fr;
 }
 
 .sidebar {
@@ -1018,4 +1022,77 @@ input[type='checkbox'] {
   width: auto !important;
   height: 38px;
   flex: none;
+}
+
+/* ---- collapsed sidebar ------------------------------------------------------------ */
+
+.sidebar {
+  overflow: hidden;
+}
+.sidebar-toggle {
+  margin-left: auto;
+}
+.sidebar-collapsed .brand {
+  flex-direction: column;
+  padding: 14px 0 10px;
+  gap: 8px;
+}
+.sidebar-collapsed .sidebar-toggle {
+  margin-left: 0;
+}
+.sidebar-collapsed .sidebar-heading {
+  justify-content: center;
+  padding: 6px 0;
+}
+.sidebar-collapsed .line-list {
+  padding: 0 6px;
+}
+.sidebar-collapsed .line-item {
+  display: grid;
+  place-items: center;
+  padding: 6px 0;
+}
+.line-initial {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--chip);
+  font-weight: 600;
+}
+.sidebar-collapsed .line-item.active .line-initial {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.sidebar-collapsed .line-item.active {
+  box-shadow: none;
+}
+.sidebar-collapsed .sidebar-footer {
+  text-align: center;
+  padding: 12px 0;
+}
+
+/* ---- add paper ----------------------------------------------------------------------- */
+
+.add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.add-row input {
+  flex: 1;
+  min-width: 0;
+}
+.add-file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.modal-body .check {
+  margin-bottom: 12px;
 }

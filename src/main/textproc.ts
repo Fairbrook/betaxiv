@@ -95,6 +95,25 @@ export function stripReferences(text: string): string {
   return [...paras.slice(0, refIdx), ...paras.slice(endIdx)].join('\n\n')
 }
 
+/**
+ * Guess the abstract of a paper from its extracted text: the paragraph(s) after an
+ * "Abstract" heading, else the first substantial paragraph. Used for imported PDFs.
+ */
+export function guessAbstract(text: string, maxChars = 2000): string {
+  const paras = text.split('\n\n').map((p) => p.trim())
+  const head = paras.findIndex((p) => /^abstract\b/i.test(p))
+  let abstract = ''
+  if (head >= 0) {
+    // "Abstract—We study…" inline, or a bare heading followed by the text.
+    abstract = paras[head].replace(/^abstract\s*[.:\u2014\u2013-]?\s*/i, '')
+    if (abstract.length < 100 && paras[head + 1]) abstract = `${abstract} ${paras[head + 1]}`.trim()
+  } else {
+    abstract = paras.slice(0, 15).find((p) => p.length > 300) ?? ''
+  }
+  if (abstract.length <= maxChars) return abstract
+  return abstract.slice(0, maxChars).replace(/\s+\S*$/, '') + '…'
+}
+
 /** Rough token estimate (~0.75 words per token for English prose). */
 export function estimateTokens(s: string): number {
   const words = s.split(/\s+/).filter(Boolean).length
