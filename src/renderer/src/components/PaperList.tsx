@@ -16,6 +16,8 @@ const STATUS_LABEL: Record<PaperStatus, string> = {
 
 const fmtDate = (iso: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '')
 
+const paperRef = (p: Paper) => (p.source === 'local' ? 'PDF' : p.id)
+
 function authorsShort(a: string[]) {
   if (a.length <= 3) return a.join(', ')
   return `${a.slice(0, 3).join(', ')} +${a.length - 3}`
@@ -89,7 +91,7 @@ export default function PaperList(props: {
               <article key={p.id} className="paper review-paper">
                 <div className="paper-title">{p.title}</div>
                 <div className="paper-meta">
-                  {authorsShort(p.authors)} · {fmtDate(p.published)} · {p.id}
+                  {authorsShort(p.authors)} · {fmtDate(p.published)} · {paperRef(p)}
                   {p.primaryCategory ? ` · ${p.primaryCategory}` : ''}
                 </div>
                 <p className="abstract">{p.abstract}</p>
@@ -101,16 +103,18 @@ export default function PaperList(props: {
                     Discard
                   </button>
                   <span className="spacer" />
-                  <button className="btn small subtle" onClick={() => api.openExternal(p.absUrl)}>
-                    arXiv page
-                  </button>
+                  {p.absUrl && (
+                    <button className="btn small subtle" onClick={() => api.openExternal(p.absUrl)}>
+                      arXiv page
+                    </button>
+                  )}
                 </div>
               </article>
             ))}
           </div>
         )}
         {shown.length === 0 && review.length === 0 && (
-          <p className="muted pad">{props.papers.length ? 'No papers match the filter.' : 'No papers yet — fetch some from arXiv.'}</p>
+          <p className="muted pad">{props.papers.length ? 'No papers match the filter.' : 'No papers yet — fetch some from arXiv or add one by hand.'}</p>
         )}
         {shown.map((p) => {
           const expanded = open === p.id
@@ -128,7 +132,7 @@ export default function PaperList(props: {
                 <button className="paper-main" onClick={() => setOpen(expanded ? null : p.id)}>
                   <span className="paper-title">{p.title}</span>
                   <span className="paper-meta">
-                    {authorsShort(p.authors)} · {fmtDate(p.published)} · {p.id}
+                    {authorsShort(p.authors)} · {fmtDate(p.published)} · {paperRef(p)}
                   </span>
                 </button>
                 <span className={`status ${p.status}`} title={p.error}>
@@ -166,9 +170,11 @@ export default function PaperList(props: {
                     <button className="btn small" onClick={() => api.openPdf(p.id)}>
                       Open PDF
                     </button>
-                    <button className="btn small" onClick={() => api.openExternal(p.absUrl)}>
-                      arXiv page
-                    </button>
+                    {p.absUrl && (
+                      <button className="btn small" onClick={() => api.openExternal(p.absUrl)}>
+                        arXiv page
+                      </button>
+                    )}
                     <button className="btn small" onClick={() => viewText(p)}>
                       Extracted text
                     </button>

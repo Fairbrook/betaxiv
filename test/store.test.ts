@@ -44,3 +44,18 @@ test('removePaper dismisses the paper and deletes it once no line uses it', () =
     fs.rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('undismiss lets a removed paper be added back', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'betaxiv-'))
+  try {
+    const store = new Store(root)
+    store.addPaper(paper('1', ['a']))
+    store.removePaper('1', 'a')
+    assert.ok(store.isDismissed('1', 'a'))
+    store.undismiss('1', 'a')
+    assert.ok(!store.isDismissed('1', 'a'))
+    assert.ok(!new Store(root).isDismissed('1', 'a'))
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})

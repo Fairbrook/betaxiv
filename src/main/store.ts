@@ -134,6 +134,14 @@ export class Store {
     return !!this.lib.dismissed?.[lineId]?.includes(paperId)
   }
 
+  /** Forget that a paper was removed from a line (it's being added back by hand). */
+  undismiss(paperId: string, lineId: string): void {
+    const list = this.lib.dismissed?.[lineId]
+    if (!list?.includes(paperId)) return
+    list.splice(list.indexOf(paperId), 1)
+    this.save()
+  }
+
   /**
    * Take a paper out of a line and remember it as dismissed there. Once no line
    * references it, it's deleted from the library and disk. Returns true if deleted.

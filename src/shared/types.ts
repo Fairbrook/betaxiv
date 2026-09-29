@@ -32,8 +32,11 @@ export interface Paper {
   updated: string
   categories: string[]
   primaryCategory?: string
+  /** Empty for imported PDFs that aren't on arXiv. */
   absUrl: string
   pdfUrl: string
+  /** 'local' = imported from a PDF file (id is local-<hash>); arXiv otherwise. */
+  source?: 'local'
   addedAt: string
   /** Research lines this paper belongs to. */
   lineIds: string[]
@@ -137,6 +140,30 @@ export interface FetchResult {
   exhausted: boolean
 }
 
+export interface AddPaperResult {
+  paperId: string
+  title: string
+  /** 'added' = new to the library; 'linked' = already in the library, now part of this line too; 'exists' = already in this line. */
+  outcome: 'added' | 'linked' | 'exists'
+}
+
+/** A PDF picked for import, with the title/authors/arXiv id guessed from it. */
+export interface PdfCandidate {
+  path: string
+  fileName: string
+  title: string
+  authors: string[]
+  arxivId: string | null
+}
+
+export interface AddPdfInput {
+  path: string
+  title: string
+  authors: string[]
+  /** Use this arXiv id's metadata (and dedupe against it) instead of the typed title/authors. */
+  arxivId?: string
+}
+
 export interface ChatTokenEvent {
   requestId: string
   token: string
@@ -170,6 +197,12 @@ export interface BetaxivApi {
   approvePapers(lineId: string, paperIds: string[]): Promise<void>
   /** Remove papers from a line (also used to discard ones awaiting review); later fetches skip them. */
   removePapers(lineId: string, paperIds: string[]): Promise<void>
+  /** Add one paper by arXiv link or id; it skips review and is downloaded and indexed right away. */
+  addArxivPaper(lineId: string, ref: string): Promise<AddPaperResult>
+  /** Open a file picker for a PDF; resolves null when cancelled. */
+  pickPdf(): Promise<PdfCandidate | null>
+  /** Import a picked PDF into the line and index it. */
+  addPdfPaper(lineId: string, input: AddPdfInput): Promise<AddPaperResult>
   cancelJob(lineId: string): Promise<void>
   openPdf(paperId: string): Promise<void>
   openExternal(url: string): Promise<void>

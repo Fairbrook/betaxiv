@@ -10,6 +10,34 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editing, setEditing] = useState<ResearchLine | 'new' | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('sidebarCollapsed') === '1'
+    } catch {
+      return false
+    }
+  })
+
+  const toggleSidebar = useCallback(() => {
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem('sidebarCollapsed', c ? '0' : '1')
+      } catch {}
+      return !c
+    })
+  }, [])
+
+  // Ctrl/Cmd+B toggles the sidebar, as in most editors.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault()
+        toggleSidebar()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [toggleSidebar])
 
   const refresh = useCallback(async () => {
     const ls = await api.listLines()
@@ -24,15 +52,24 @@ export default function App() {
   const selected = lines.find((l) => l.id === selectedId) ?? null
 
   return (
-    <div className="app">
+    <div className={`app ${collapsed ? 'sidebar-collapsed' : ''}`}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">β</span>
-          <span>betaxiv</span>
+          {!collapsed && <span>betaxiv</span>}
+          <button
+            className="icon-btn sidebar-toggle"
+            title={collapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!collapsed}
+            onClick={toggleSidebar}
+          >
+            {collapsed ? '»' : '«'}
+          </button>
         </div>
         <div className="sidebar-section">
           <div className="sidebar-heading">
-            <span>Research lines</span>
+            {!collapsed && <span>Research lines</span>}
             <button className="icon-btn" title="New research line" onClick={() => setEditing('new')}>
               +
             </button>
@@ -42,17 +79,24 @@ export default function App() {
               <button
                 key={l.id}
                 className={`line-item ${l.id === selectedId ? 'active' : ''}`}
+                title={collapsed ? l.name : undefined}
                 onClick={() => setSelectedId(l.id)}
               >
-                <span className="line-name">{l.name}</span>
-                <span className="line-kw">{l.keywords.join(l.matchMode === 'all' ? ' · ' : ' | ')}</span>
+                {collapsed ? (
+                  <span className="line-initial">{l.name.trim().charAt(0).toUpperCase() || '?'}</span>
+                ) : (
+                  <>
+                    <span className="line-name">{l.name}</span>
+                    <span className="line-kw">{l.keywords.join(l.matchMode === 'all' ? ' · ' : ' | ')}</span>
+                  </>
+                )}
               </button>
             ))}
-            {lines.length === 0 && <p className="muted small pad">No research lines yet.</p>}
+            {lines.length === 0 && !collapsed && <p className="muted small pad">No research lines yet.</p>}
           </nav>
         </div>
-        <button className="sidebar-footer" onClick={() => setShowSettings(true)}>
-          ⚙ Settings
+        <button className="sidebar-footer" title="Settings" onClick={() => setShowSettings(true)}>
+          {collapsed ? '⚙' : '⚙ Settings'}
         </button>
       </aside>
 

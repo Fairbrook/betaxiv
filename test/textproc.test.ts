@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chunkText, cleanText, pageItemsToText, stripReferences } from '../src/main/textproc'
+import { chunkText, cleanText, guessAbstract, pageItemsToText, stripReferences } from '../src/main/textproc'
 
 test('pageItemsToText separates lines and paragraphs by vertical gaps', () => {
   const out = pageItemsToText([
@@ -41,4 +41,13 @@ test('chunkText respects size and overlap', () => {
 
 test('chunkText returns a single chunk for short text', () => {
   assert.deepEqual(chunkText('short text', 1000, 200), ['short text'])
+})
+
+test('guessAbstract finds the abstract paragraph', () => {
+  const body = 'We study things. '.repeat(10).trim()
+  assert.equal(guessAbstract(`A Title\n\nAda Lovelace\n\nAbstract\n\n${body}\n\n1 Introduction`), body)
+  assert.equal(guessAbstract(`A Title\n\nAbstract—${body}\n\n1 Introduction`), body)
+  const long = 'Words and more words. '.repeat(20).trim()
+  assert.equal(guessAbstract(`Title\n\nshort\n\n${long}`), long)
+  assert.ok(guessAbstract(`Abstract: ${'x '.repeat(3000)}`, 100).endsWith('…'))
 })
