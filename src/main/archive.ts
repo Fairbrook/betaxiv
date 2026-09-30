@@ -45,7 +45,8 @@ export function collectEntries(root: string, opts: ExportOptions, exclude: strin
       const abs = path.join(dir, d.name)
       const relName = rel ? `${rel}/${d.name}` : d.name
       if (d.isDirectory()) {
-        if (!rel && skipDirs.has(d.name)) continue
+        // *.tmp folders are imports being unpacked.
+        if (!rel && (skipDirs.has(d.name) || d.name.endsWith('.tmp'))) continue
         walk(abs, relName)
       } else if (d.isFile()) {
         if (d.name.endsWith('.tmp') || skipFiles.has(path.resolve(abs))) continue
@@ -248,4 +249,159 @@ async function* zipStream(entries: Entry[]): AsyncGenerator<Buffer> {
   end.writeUInt32LE(offset, 16)
   yield cdBuf
   yield end
+}
+
+// ---- import ---------------------------------------------------------------
+
+/**
+ * Unpack a betaxiv export (zip, tar.gz or tar, detected from its first bytes) into `destDir`.
+ * Only files under betaxiv-data/ with plain relative paths are written; settings.json, the
+ * manifest and anything that would land outside `destDir` are skipped.
+ */
+export async function extractArchive(file: string, destDir: string): Promise<number> {
+  const head = Buffer.alloc(512)
+  const fd = fs.openSync(file, 'r')
+  let headLen: number
+  try {
+    headLen = fs.readSync(fd, head, 0, 512, 0)
+  } finally {
+    fs.closeSync(fd)
+  }
+  fs.mkdirSync(destDir, { recursive: true })
+  let written = 0
+  const write = (name: string, data: Buffer | Iterable<Buffer>) => {
+    const rel = importPath(name)
+    if (!rel) return
+    const target = path.join(destDir, ...rel.split('/'))
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, Buffer.isBuffer(data) ? data : Buffer.concat([...data]))
+    written++
+  }
+  if (head.readUInt32LE(0) === 0x04034b50) readZip(file, write)
+  else if (head[0] === 0x1f && head[1] === 0x8b) await readTar(fs.createReadStream(file).pipe(zlib.createGunzip()), write)
+  else if (headLen === 512 && head.toString('ascii', 257, 262) === 'ustar') await readTar(fs.createReadStream(file), write)
+  else throw new Error('Not a zip, tar.gz or tar archive')
+  if (!fs.existsSync(path.join(destDir, 'library.json'))) {
+    throw new Error('This archive has no betaxiv library in it (betaxiv-data/library.json is missing)')
+  }
+  return written
+}
+
+const SEGMENT = /^[A-Za-z0-9._-]+$/
+
+/** Map an archive entry to a safe path relative to the data folder, or null to skip it. */
+export function importPath(name: string): string | null {
+  const prefix = `${ARCHIVE_ROOT}/`
+  if (!name.startsWith(prefix)) return null
+  const rel = name.slice(prefix.length)
+  const parts = rel.split('/')
+  if (parts.some((p) => !SEGMENT.test(p) || p === '.' || p === '..')) return null
+  if (parts.length === 1 && (rel === 'settings.json' || rel === 'manifest.json')) return null
+  if (parts[0] === 'claude' || parts[parts.length - 1].endsWith('.tmp')) return null
+  return rel
+}
+
+function readZip(file: string, write: (name: string, data: Buffer) => void) {
+  const fd = fs.openSync(file, 'r')
+  try {
+    const size = fs.fstatSync(fd).size
+    const read = (pos: number, len: number) => {
+      const b = Buffer.alloc(len)
+      fs.readSync(fd, b, 0, len, pos)
+      return b
+    }
+    const tailLen = Math.min(size, 0xffff + 22)
+    const tail = read(size - tailLen, tailLen)
+    const at = tail.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
+    if (at < 0) throw new Error('Damaged zip archive (no central directory)')
+    const count = tail.readUInt16LE(at + 10)
+    const cdSize = tail.readUInt32LE(at + 12)
+    const cdOffset = tail.readUInt32LE(at + 16)
+    if (count === 0xffff || cdOffset === MAX32) throw new Error('Zip64 archives aren’t supported; export as tar.gz instead')
+    const cd = read(cdOffset, cdSize)
+    let p = 0
+    for (let i = 0; i < count; i++) {
+      if (cd.readUInt32LE(p) !== 0x02014b50) throw new Error('Damaged zip archive')
+      const method = cd.readUInt16LE(p + 10)
+      const crc = cd.readUInt32LE(p + 16)
+      const csize = cd.readUInt32LE(p + 20)
+      const nameLen = cd.readUInt16LE(p + 28)
+      const skip = nameLen + cd.readUInt16LE(p + 30) + cd.readUInt16LE(p + 32)
+      const offset = cd.readUInt32LE(p + 42)
+      const name = cd.toString('utf8', p + 46, p + 46 + nameLen)
+      p += 46 + skip
+      if (name.endsWith('/') || !importPath(name)) continue
+      const local = read(offset, 30)
+      const body = read(offset + 30 + local.readUInt16LE(26) + local.readUInt16LE(28), csize)
+      let data: Buffer
+      if (method === 0) data = body
+      else if (method === 8) data = zlib.inflateRawSync(body)
+      else throw new Error(`${name} uses an unsupported zip compression method`)
+      if (zlib.crc32(data) !== crc) throw new Error(`${name} is damaged (checksum mismatch)`)
+      write(name, data)
+    }
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+/** Streaming tar reader: ustar, pax ('x') and GNU long-name ('L') headers; only regular files are kept. */
+async function readTar(stream: AsyncIterable<Buffer | string>, write: (name: string, data: Buffer[]) => void) {
+  let buf = Buffer.alloc(0)
+  let longName: string | null = null
+  // Current entry: remaining body bytes, padding to skip and where its data goes.
+  let body: { remaining: number; pad: number; kind: 'file' | 'meta' | 'skip'; type: string; name: string; parts: Buffer[] } | null = null
+
+  const finish = (e: NonNullable<typeof body>) => {
+    if (e.kind === 'file') write(e.name, e.parts)
+    else if (e.kind === 'meta') {
+      const text = Buffer.concat(e.parts).toString('utf8')
+      if (e.type === 'L') longName = text.replace(/\0.*$/s, '')
+      else {
+        const m = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(text)
+        if (m) longName = m[1]
+      }
+    }
+  }
+
+  for await (const chunk of stream) {
+    buf = buf.length ? Buffer.concat([buf, Buffer.from(chunk)]) : Buffer.from(chunk)
+    for (;;) {
+      if (body) {
+        const take = Math.min(body.remaining, buf.length)
+        if (body.kind !== 'skip' && take) body.parts.push(Buffer.from(buf.subarray(0, take)))
+        body.remaining -= take
+        buf = buf.subarray(take)
+        if (body.remaining > 0) break
+        if (buf.length < body.pad) break
+        buf = buf.subarray(body.pad)
+        finish(body)
+        body = null
+        continue
+      }
+      if (buf.length < 512) break
+      const h = buf.subarray(0, 512)
+      buf = buf.subarray(512)
+      if (h.every((b) => b === 0)) continue // end-of-archive blocks
+      const str = (o: number, l: number) => h.toString('utf8', o, o + l).replace(/\0.*$/s, '')
+      const size = parseInt(str(124, 12).trim() || '0', 8)
+      if (!Number.isFinite(size)) throw new Error('Damaged tar archive')
+      const type = String.fromCharCode(h[156]) || '0'
+      const prefix = h.toString('ascii', 257, 262) === 'ustar' ? str(345, 155) : ''
+      let name = prefix ? `${prefix}/${str(0, 100)}` : str(0, 100)
+      let kind: 'file' | 'meta' | 'skip' = 'skip'
+      if (type === 'x' || type === 'L') kind = 'meta'
+      else {
+        if (longName !== null) name = longName
+        longName = null
+        if ((type === '0' || type === '\0') && importPath(name)) kind = 'file'
+      }
+      body = { remaining: size, pad: (512 - (size % 512)) % 512, kind, type, name, parts: [] }
+      if (size === 0) {
+        finish(body)
+        body = null
+      }
+    }
+  }
+  if (body) throw new Error('The tar archive ends early; it may be incomplete')
 }

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { readJson, writeJson } from './fsutil'
-import type { ChatMessage, NewLineInput, Paper, ResearchLine } from '../shared/types'
+import type { ChatMessage, ImportResult, NewLineInput, Paper, PaperStatus, ResearchLine } from '../shared/types'
 
 interface Library {
   version: 1
@@ -44,7 +44,7 @@ export class Store {
 
   paperDir(id: string): string {
     // Old-style ids contain a slash (hep-th/9901001).
-    return path.join(this.root, 'papers', id.replace(/\//g, '_'))
+    return path.join(this.root, 'papers', this.dirName(id))
   }
 
   // ---- research lines -------------------------------------------------------
@@ -162,6 +162,102 @@ export class Store {
     }
     this.save()
     return deleted
+  }
+
+  // ---- import ---------------------------------------------------------------
+
+  /**
+   * Merge another data folder (an unpacked export) into this library. Nothing here is
+   * deleted or overwritten, except a paper that isn't indexed yet, which takes the imported
+   * copy when that one is indexed. Files are moved out of `src`, so it's spent afterwards.
+   */
+  importFrom(src: string): ImportResult {
+    const other = readJson<Partial<Library> | null>(path.join(src, 'library.json'), null)
+    if (!other || !Array.isArray(other.lines) || !other.papers || typeof other.papers !== 'object') {
+      throw new Error('This archive has no betaxiv library in it')
+    }
+    const result: ImportResult = { lines: 0, papers: 0, linked: 0, updated: 0 }
+    for (const l of other.lines) {
+      if (!l || typeof l.id !== 'string' || this.lib.lines.some((x) => x.id === l.id)) continue
+      this.lib.lines.push(l)
+      result.lines++
+    }
+    const lineIds = new Set(this.lib.lines.map((l) => l.id))
+    const busy = (s: PaperStatus) => s === 'downloading' || s === 'extracting' || s === 'indexing'
+
+    for (const p of Object.values(other.papers)) {
+      if (!p || typeof p.id !== 'string' || !/^[A-Za-z0-9._\/-]+$/.test(p.id) || /^\.+$/.test(this.dirName(p.id))) continue
+      const ids = (Array.isArray(p.lineIds) ? p.lineIds : []).filter((id) => lineIds.has(id))
+      if (!ids.length) continue
+      const from = path.join(src, 'papers', this.dirName(p.id))
+      const status: PaperStatus = busy(p.status) ? 'pending' : p.status
+      const cur = this.lib.papers[p.id]
+      if (!cur) {
+        this.lib.papers[p.id] = { ...p, lineIds: ids, status }
+        this.moveDir(from, this.paperDir(p.id))
+        result.papers++
+        continue
+      }
+      const added = ids.filter((id) => !cur.lineIds.includes(id))
+      cur.lineIds.push(...added)
+      if (added.length) result.linked++
+      if (cur.status !== 'indexed' && !busy(cur.status) && status === 'indexed' && fs.existsSync(from)) {
+        fs.rmSync(this.paperDir(p.id), { recursive: true, force: true })
+        this.moveDir(from, this.paperDir(p.id))
+        Object.assign(cur, { ...p, lineIds: cur.lineIds, addedAt: cur.addedAt, status })
+        delete cur.error
+        result.updated++
+      }
+    }
+
+    for (const [lineId, list] of Object.entries(other.dismissed ?? {})) {
+      if (!lineIds.has(lineId) || !Array.isArray(list)) continue
+      const mine = ((this.lib.dismissed ??= {})[lineId] ??= [])
+      for (const id of list) {
+        if (typeof id === 'string' && !mine.includes(id) && !this.lib.papers[id]?.lineIds.includes(lineId)) mine.push(id)
+      }
+    }
+
+    for (const lineId of lineIds) {
+      const theirs = readJson<ChatMessage[]>(path.join(src, 'chats', `${lineId}.json`), [])
+      if (!Array.isArray(theirs) || !theirs.length) continue
+      const mine = this.chatHistory(lineId)
+      const seen = new Set(mine.map((m) => m.id))
+      const merged = [...mine, ...theirs.filter((m) => m && !seen.has(m.id))]
+      if (merged.length === mine.length) continue
+      merged.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+      writeJson(this.chatFile(lineId), merged)
+    }
+
+    // A bundled embedding model saves re-downloading it; keep any copy that's already here.
+    this.moveMissing(path.join(src, 'models'), path.join(this.root, 'models'))
+    this.save()
+    return result
+  }
+
+  private dirName(id: string): string {
+    return id.replace(/\//g, '_')
+  }
+
+  private moveDir(from: string, to: string) {
+    if (!fs.existsSync(from)) return
+    fs.mkdirSync(path.dirname(to), { recursive: true })
+    fs.renameSync(from, to)
+  }
+
+  private moveMissing(from: string, to: string) {
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(from, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const a = path.join(from, e.name)
+      const b = path.join(to, e.name)
+      if (!fs.existsSync(b)) this.moveDir(a, b)
+      else if (e.isDirectory()) this.moveMissing(a, b)
+    }
   }
 
   // ---- chats ----------------------------------------------------------------

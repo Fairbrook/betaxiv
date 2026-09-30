@@ -191,6 +191,17 @@ export interface ExportResult {
   bytes: number
 }
 
+export interface ImportResult {
+  /** Research lines added. */
+  lines: number
+  /** Papers new to the library. */
+  papers: number
+  /** Papers already here that joined more research lines. */
+  linked: number
+  /** Papers here that weren't indexed yet and took the imported, indexed copy. */
+  updated: number
+}
+
 export interface BetaxivApi {
   getSettings(): Promise<Settings>
   saveSettings(s: Settings): Promise<Settings>
@@ -201,6 +212,8 @@ export interface BetaxivApi {
    * as an archive. Asks where to save it; resolves null when cancelled.
    */
   exportData(opts: ExportOptions): Promise<ExportResult | null>
+  /** Pick an exported archive and merge it into the library; resolves null when cancelled. */
+  importData(): Promise<ImportResult | null>
 
   listLines(): Promise<ResearchLine[]>
   createLine(input: NewLineInput): Promise<ResearchLine>

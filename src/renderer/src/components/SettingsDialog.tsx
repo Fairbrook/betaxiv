@@ -20,7 +20,7 @@ const EMB_LABELS: Record<EmbeddingProvider, string> = {
   ollama: 'Ollama — local server'
 }
 
-export default function SettingsDialog(props: { onClose: () => void }) {
+export default function SettingsDialog(props: { onClose: () => void; onImported: () => void }) {
   const [s, setS] = useState<Settings | null>(null)
   const [saved, setSaved] = useState(false)
   const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null)
@@ -29,6 +29,7 @@ export default function SettingsDialog(props: { onClose: () => void }) {
   const [exportModels, setExportModels] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exported, setExported] = useState<{ ok: boolean; text: string } | null>(null)
+  const [importing, setImporting] = useState(false)
 
   useEffect(() => {
     api.getSettings().then(setS)
@@ -69,6 +70,26 @@ export default function SettingsDialog(props: { onClose: () => void }) {
       setExported({ ok: false, text: cleanError(e) })
     }
     setExporting(false)
+  }
+
+  const runImport = async () => {
+    setImporting(true)
+    setExported(null)
+    try {
+      const res = await api.importData()
+      if (res) {
+        const parts = [
+          `${res.lines} research line${res.lines === 1 ? '' : 's'} and ${res.papers} paper${res.papers === 1 ? '' : 's'} added`,
+          res.linked ? `${res.linked} existing paper${res.linked === 1 ? '' : 's'} linked to more lines` : '',
+          res.updated ? `${res.updated} unfinished paper${res.updated === 1 ? '' : 's'} replaced by indexed copies` : ''
+        ]
+        setExported({ ok: true, text: `Imported: ${parts.filter(Boolean).join(', ')}` })
+        props.onImported()
+      }
+    } catch (e) {
+      setExported({ ok: false, text: cleanError(e) })
+    }
+    setImporting(false)
   }
 
   const needsKey = (p: string) => ['anthropic', 'gemini', 'openai'].includes(p)
@@ -218,10 +239,12 @@ export default function SettingsDialog(props: { onClose: () => void }) {
         Drop the references section before indexing
       </label>
 
-      <h3>Export library</h3>
+      <h3>Export &amp; import</h3>
       <p className="muted small">
         Saves every research line with its papers, PDFs, extracted text, chunks, embeddings, entity maps and chat
         history as one archive. Settings are included without API keys or tokens.
+        Importing merges an export into this library: lines and papers you already have are kept, and chats are
+        combined. Papers embedded with a different model than yours fall back to keyword search until re-indexed.
       </p>
       <div className="test-row">
         <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value as ExportFormat)}>
@@ -235,6 +258,9 @@ export default function SettingsDialog(props: { onClose: () => void }) {
         </label>
         <button className="btn small" disabled={exporting} onClick={runExport}>
           {exporting ? 'Exporting…' : 'Export…'}
+        </button>
+        <button className="btn small" disabled={importing} onClick={runImport}>
+          {importing ? 'Importing…' : 'Import…'}
         </button>
       </div>
       {exported && (

@@ -133,7 +133,7 @@ export default function App() {
           }}
         />
       )}
-      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} onImported={refresh} />}
     </div>
   )
 }
