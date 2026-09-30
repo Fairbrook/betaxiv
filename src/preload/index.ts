@@ -11,6 +11,8 @@ const api: BetaxivApi = {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (s) => ipcRenderer.invoke('settings:save', s),
   testLlm: (s) => ipcRenderer.invoke('settings:testLlm', s),
+  exportData: (opts) => ipcRenderer.invoke('data:export', opts),
+  importData: () => ipcRenderer.invoke('data:import'),
 
   listLines: () => ipcRenderer.invoke('lines:list'),
   createLine: (input) => ipcRenderer.invoke('lines:create', input),
