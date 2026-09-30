@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { archiveExtension, exportData } from './archive'
 import { buildSearchQuery } from './arxiv'
 import { setModelCacheDir } from './embeddings'
 import { Pipeline } from './pipeline'
@@ -11,7 +12,7 @@ import { inspectPdf } from './pdf'
 import { ask } from './rag'
 import { getSettings, initSettings, saveSettings } from './settings'
 import { Store } from './store'
-import type { AddPdfInput, ChatMessage, NewLineInput, PdfCandidate, ResearchLine, Settings } from '../shared/types'
+import type { AddPdfInput, ChatMessage, ExportOptions, ExportResult, NewLineInput, PdfCandidate, ResearchLine, Settings } from '../shared/types'
 
 let win: BrowserWindow | null = null
 
@@ -69,6 +70,19 @@ app.whenReady().then(() => {
       workDir
     )
     return `${s.llmProvider} / ${s.llmModel} replied: ${reply.trim().slice(0, 80)}`
+  })
+
+  ipcMain.handle('data:export', async (_e, opts: ExportOptions): Promise<ExportResult | null> => {
+    const format = (['zip', 'tar.gz', 'tar'] as const).find((f) => f === opts?.format) ?? 'zip'
+    const ext = archiveExtension(format)
+    const dialogOpts = {
+      title: 'Export library',
+      defaultPath: path.join(app.getPath('downloads'), `betaxiv-${new Date().toISOString().slice(0, 10)}.${ext}`),
+      filters: [{ name: format === 'zip' ? 'Zip archive' : 'Tar archive', extensions: [format === 'tar.gz' ? 'gz' : ext] }]
+    }
+    const res = win ? await dialog.showSaveDialog(win, dialogOpts) : await dialog.showSaveDialog(dialogOpts)
+    if (res.canceled || !res.filePath) return null
+    return exportData(dataDir, res.filePath, { format, includeModels: !!opts?.includeModels })
   })
 
   ipcMain.handle('lines:list', () => store.listLines())

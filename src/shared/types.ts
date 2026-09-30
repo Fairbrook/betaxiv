@@ -177,11 +177,30 @@ export interface NewLineInput {
   sortBy: SortBy
 }
 
+export type ExportFormat = 'zip' | 'tar.gz' | 'tar'
+
+export interface ExportOptions {
+  format: ExportFormat
+  /** Also include the cached local embedding model (re-downloadable, ~35 MB+). */
+  includeModels?: boolean
+}
+
+export interface ExportResult {
+  path: string
+  files: number
+  bytes: number
+}
+
 export interface BetaxivApi {
   getSettings(): Promise<Settings>
   saveSettings(s: Settings): Promise<Settings>
   /** Send a tiny prompt with the given (unsaved) settings; resolves with the reply. */
   testLlm(s: Settings): Promise<string>
+  /**
+   * Save the whole library (papers, PDFs, extracted text, chunks, embeddings, entity maps, chats)
+   * as an archive. Asks where to save it; resolves null when cancelled.
+   */
+  exportData(opts: ExportOptions): Promise<ExportResult | null>
 
   listLines(): Promise<ResearchLine[]>
   createLine(input: NewLineInput): Promise<ResearchLine>

@@ -161,6 +161,16 @@ data/
   models/                   cached local embedding model
 ```
 
+### Exporting
+
+**Settings → Export library** saves the whole data folder as a `.zip`, `.tar.gz` or `.tar`: research lines, paper
+metadata, PDFs, extracted text, chunks, embeddings, entity maps and chat histories. Everything sits under a
+`betaxiv-data/` folder with the layout above, plus a `manifest.json`. `settings.json` is included without API keys or
+tokens (they're encrypted with this machine's keychain anyway). The cached embedding model is left out unless you tick
+the box, since it downloads again on first use. To use an export, extract it and start the app with
+`BETAXIV_DATA_DIR=/path/to/betaxiv-data`, or copy the folder's contents into the app's data folder. Zip archives are
+limited to 4 GB; use `.tar.gz` for larger libraries.
+
 ## Project layout
 
 ```
@@ -175,6 +185,7 @@ src/main/        Electron main process
   llm.ts           Claude Agent SDK, Anthropic, Gemini, OpenAI, Ollama streaming
   pipeline.ts      fetch-until-N-new → download → extract → index jobs
   store.ts         file-based library
+  archive.ts       zip / tar export of the data folder
 src/preload/     IPC bridge (context-isolated)
 src/renderer/    React UI
 ```
