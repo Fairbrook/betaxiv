@@ -107,7 +107,9 @@ code {
   grid-template-columns: 56px 1fr;
 }
 
-.sidebar {
+/* Not `.sidebar`: pdf.js's stylesheet (loaded with the reader) has an unscoped `.sidebar` rule that sets
+   its own width, min-width, radius and shadow, which broke the collapsed sidebar once a PDF was open. */
+.app-sidebar {
   background: var(--sidebar);
   border-right: 1px solid var(--border);
   display: flex;
@@ -1052,7 +1054,7 @@ input[type='checkbox'] {
 
 /* ---- collapsed sidebar ------------------------------------------------------------ */
 
-.sidebar {
+.app-sidebar {
   overflow: hidden;
 }
 .sidebar-toggle {

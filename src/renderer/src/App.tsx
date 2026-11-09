@@ -174,7 +174,7 @@ export default function App() {
 
   return (
     <div className={`app ${collapsed ? 'sidebar-collapsed' : ''}`}>
-      <aside className="sidebar">
+      <aside className="app-sidebar">
         <div className="brand">
           <span className="brand-mark">β</span>
           {!collapsed && <span>betaxiv</span>}
