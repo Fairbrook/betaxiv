@@ -31,6 +31,14 @@ const api: BetaxivApi = {
   addPdfPaper: (lineId, input) => ipcRenderer.invoke('papers:addPdf', lineId, input),
   cancelJob: (lineId) => ipcRenderer.invoke('job:cancel', lineId),
   openPdf: (paperId) => ipcRenderer.invoke('papers:openPdf', paperId),
+  hasPdf: (paperId) => ipcRenderer.invoke('reader:hasPdf', paperId),
+  readerState: (paperId) => ipcRenderer.invoke('reader:state', paperId),
+  saveReaderState: (paperId, state) => ipcRenderer.invoke('reader:saveState', paperId, state),
+  saveAnnotations: (paperId, pdf) => ipcRenderer.invoke('reader:saveAnnotations', paperId, pdf),
+  paperNotes: (paperId) => ipcRenderer.invoke('reader:notes', paperId),
+  savePaperNotes: (paperId, text) => ipcRenderer.invoke('reader:saveNotes', paperId, text),
+  listBookmarks: (lineId) => ipcRenderer.invoke('bookmarks:list', lineId),
+  setBookmark: (lineId, paperId, on) => ipcRenderer.invoke('bookmarks:set', lineId, paperId, on),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   getPaperText: (paperId) => ipcRenderer.invoke('papers:text', paperId),
   lineMap: (lineId) => ipcRenderer.invoke('lines:map', lineId),
@@ -42,7 +50,18 @@ const api: BetaxivApi = {
 
   onJobProgress: (cb) => subscribe('job:progress', cb),
   onPapersChanged: (cb) => subscribe('papers:changed', cb),
-  onChatToken: (cb) => subscribe('chat:token', cb)
+  onChatToken: (cb) => subscribe('chat:token', cb),
+  onBeforeClose: (cb) => {
+    const listener = async () => {
+      try {
+        await cb()
+      } finally {
+        ipcRenderer.send('app:flushed')
+      }
+    }
+    ipcRenderer.on('app:before-close', listener)
+    return () => ipcRenderer.removeListener('app:before-close', listener)
+  }
 }
 
 contextBridge.exposeInMainWorld('betaxiv', api)

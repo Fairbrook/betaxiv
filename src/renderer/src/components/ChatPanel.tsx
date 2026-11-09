@@ -84,6 +84,8 @@ export default function ChatPanel(props: {
   papers: Paper[]
   scope: string[]
   setScope: (s: string[]) => void
+  /** The scope is fixed (e.g. the paper open in the reader): no way to widen or drop it. */
+  lockScope?: boolean
   /** Question to prefill in the composer (e.g. from the entity map). */
   draft?: { text: string; nonce: number } | null
 }) {
@@ -161,12 +163,16 @@ export default function ChatPanel(props: {
               {scoped.map((p) => (
                 <span key={p.id} className="chip removable" title={p.title}>
                   {p.title.length > 40 ? `${p.title.slice(0, 40)}…` : p.title}
-                  <button onClick={() => props.setScope(props.scope.filter((x) => x !== p.id))}>×</button>
+                  {!props.lockScope && (
+                    <button onClick={() => props.setScope(props.scope.filter((x) => x !== p.id))}>×</button>
+                  )}
                 </span>
               ))}
-              <button className="link" onClick={() => props.setScope([])}>
-                all papers
-              </button>
+              {!props.lockScope && (
+                <button className="link" onClick={() => props.setScope([])}>
+                  all papers
+                </button>
+              )}
             </>
           )}
         </div>

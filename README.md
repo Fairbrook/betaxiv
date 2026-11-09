@@ -39,6 +39,29 @@ rewritten in TypeScript so it runs inside the app, with no Python server to star
    retrieved excerpts go to the LLM with a prompt adapted from alphaxiv-open, and the answer streams in with `[n]`
    citations you can click to see the excerpt.
 
+## Reading papers
+
+**Read** in a paper's expanded view opens it in the built-in reader instead of an external PDF viewer (**Open
+externally** is still there). Each paper you open becomes a tab under its research line in the left sidebar, like a
+folder of open papers: click it to come back, `×` (or a middle click) closes it, and the chevron next to the line
+folds the list. Open tabs and the paper you were on come back after a restart.
+
+- **Where you left off.** The page, scroll position and zoom are remembered per paper and restored when you reopen it.
+  The zoom stays on "fit to width" until you pick another.
+- **Annotations.** *Highlight*, *Text* and *Draw* (with a few colours) are pdf.js's own annotation tools. Edits are
+  written, a moment after you make them and again when you close a tab or the window, into an annotated copy of the
+  PDF (`paper.annotated.pdf`); the original download is never touched and is still what gets indexed. You can see and
+  edit them again next time, and any other PDF viewer will show them too.
+- **Notes.** The *Notes* panel is a free-text note per paper, saved as you type.
+- **Ask.** The *Ask* panel is the research line's chat, limited to the open paper (the paper has to be indexed).
+- **Find** with Ctrl+F; Enter and Shift+Enter jump between matches.
+
+### Bookmarks
+
+The ☆ next to a paper (in the list, or in the reader's toolbar) bookmarks it **within that research line**; the same
+paper can be bookmarked in one line and not in another. **★ Bookmarked** next to the filter box shows only the
+bookmarked papers of the line, and it combines with the text filter. Bookmarked papers get a ★ in the sidebar.
+
 ## Entity map
 
 After a paper is indexed, one extra LLM call reads only its title, abstract and introduction. It returns a
@@ -151,12 +174,15 @@ Everything is stored under the app's user-data folder (`BETAXIV_DATA_DIR` overri
 
 ```
 data/
-  library.json              research lines + paper metadata
+  library.json              research lines + paper metadata + bookmarks per line
   settings.json             settings (API keys encrypted with the OS keychain)
   papers/<id>/paper.pdf     full text
   papers/<id>/paper.md      extracted, cleaned text
   papers/<id>/chunks.json   chunks + embedding model
   papers/<id>/embeddings.bin
+  papers/<id>/reader.json   where the reader left off (page, scroll, zoom)
+  papers/<id>/paper.annotated.pdf  your highlights, text and drawings (the original stays in paper.pdf)
+  papers/<id>/notes.md      your notes on the paper
   chats/<lineId>.json       conversation history per research line
   models/                   cached local embedding model
 ```
@@ -164,7 +190,8 @@ data/
 ### Exporting
 
 **Settings → Export library** saves the whole data folder as a `.zip`, `.tar.gz` or `.tar`: research lines, paper
-metadata, PDFs, extracted text, chunks, embeddings, entity maps and chat histories. Everything sits under a
+metadata, PDFs, extracted text, chunks, embeddings, entity maps, chat histories, bookmarks, and your reading
+positions, annotations and notes. Everything sits under a
 `betaxiv-data/` folder with the layout above, plus a `manifest.json`. `settings.json` is included without API keys or
 tokens (they're encrypted with this machine's keychain anyway). The cached embedding model is left out unless you tick
 the box, since it downloads again on first use. Zip archives are limited to 4 GB; use `.tar.gz` for larger libraries.

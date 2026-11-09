@@ -177,6 +177,18 @@ export interface NewLineInput {
   sortBy: SortBy
 }
 
+/** Where the reader left off in a paper. */
+export interface ReaderState {
+  /** 1-based page number. */
+  page: number
+  /** Scroll offset within the page, in PDF points (null = top of the page). */
+  top: number | null
+  left: number | null
+  /** pdf.js scale: a number as text ("1.25") or a named value ("page-width"). */
+  scale: string
+  updatedAt: string
+}
+
 export type ExportFormat = 'zip' | 'tar.gz' | 'tar'
 
 export interface ExportOptions {
@@ -236,7 +248,19 @@ export interface BetaxivApi {
   /** Import a picked PDF into the line and index it. */
   addPdfPaper(lineId: string, input: AddPdfInput): Promise<AddPaperResult>
   cancelJob(lineId: string): Promise<void>
+  /** Open the PDF in the system's PDF viewer. */
   openPdf(paperId: string): Promise<void>
+  /** True when the paper's PDF file is on disk (so the built-in reader can show it). */
+  hasPdf(paperId: string): Promise<boolean>
+  readerState(paperId: string): Promise<ReaderState | null>
+  saveReaderState(paperId: string, state: ReaderState): Promise<void>
+  /** Save the PDF with the reader's annotations (highlights, text, drawings) baked in. */
+  saveAnnotations(paperId: string, pdf: Uint8Array): Promise<void>
+  paperNotes(paperId: string): Promise<string>
+  savePaperNotes(paperId: string, text: string): Promise<void>
+  /** Bookmarked paper ids of a research line. */
+  listBookmarks(lineId: string): Promise<string[]>
+  setBookmark(lineId: string, paperId: string, on: boolean): Promise<string[]>
   openExternal(url: string): Promise<void>
   getPaperText(paperId: string): Promise<string>
   lineMap(lineId: string): Promise<LineEntity[]>
@@ -249,4 +273,9 @@ export interface BetaxivApi {
   onJobProgress(cb: (p: JobProgress) => void): () => void
   onPapersChanged(cb: (lineId: string) => void): () => void
   onChatToken(cb: (e: ChatTokenEvent) => void): () => void
+  /**
+   * The window is about to close: `cb` should write out anything still pending. The close
+   * waits for it to settle (up to a few seconds).
+   */
+  onBeforeClose(cb: () => Promise<void> | void): () => void
 }

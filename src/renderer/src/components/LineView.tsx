@@ -9,9 +9,16 @@ import PaperList from './PaperList'
 export const cleanError = (e: unknown) =>
   String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 
-export default function LineView(props: { line: ResearchLine; onEdit: () => void; onDeleted: () => void }) {
+export default function LineView(props: {
+  line: ResearchLine
+  onEdit: () => void
+  onDeleted: () => void
+  /** Open a paper in the built-in reader (a tab under this line in the sidebar). */
+  onOpenPaper: (paper: Paper) => void
+}) {
   const { line } = props
   const [papers, setPapers] = useState<Paper[]>([])
+  const [bookmarks, setBookmarks] = useState<string[]>([])
   const [progress, setProgress] = useState<JobProgress | null>(null)
   const [count, setCount] = useState(5)
   const [scope, setScope] = useState<string[]>([])
@@ -21,7 +28,16 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
   const [draft, setDraft] = useState<{ text: string; nonce: number } | null>(null)
   const [adding, setAdding] = useState(false)
 
-  const reload = useCallback(() => api.listPapers(line.id).then(setPapers), [line.id])
+  const reload = useCallback(
+    () => Promise.all([api.listPapers(line.id).then(setPapers), api.listBookmarks(line.id).then(setBookmarks)]),
+    [line.id]
+  )
+
+  const toggleBookmark = (paperId: string) =>
+    api
+      .setBookmark(line.id, paperId, !bookmarks.includes(paperId))
+      .then(setBookmarks)
+      .catch((e) => alert(cleanError(e)))
 
   useEffect(() => {
     api.getSettings().then((s) => {
@@ -165,7 +181,17 @@ export default function LineView(props: { line: ResearchLine; onEdit: () => void
             </button>
           </div>
           {tab === 'papers' ? (
-            <PaperList lineId={line.id} papers={papers} scope={scope} setScope={setScope} busy={running} runJob={runJob} />
+            <PaperList
+              lineId={line.id}
+              papers={papers}
+              scope={scope}
+              setScope={setScope}
+              busy={running}
+              runJob={runJob}
+              bookmarks={bookmarks}
+              onToggleBookmark={toggleBookmark}
+              onOpen={props.onOpenPaper}
+            />
           ) : (
             <EntityMap
               lineId={line.id}

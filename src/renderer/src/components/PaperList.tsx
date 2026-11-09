@@ -30,18 +30,50 @@ export default function PaperList(props: {
   setScope: (s: string[]) => void
   busy: boolean
   runJob: (fn: () => Promise<unknown>) => Promise<void>
+  /** Bookmarked paper ids of this research line. */
+  bookmarks: string[]
+  onToggleBookmark: (paperId: string) => void
+  /** Open the paper in the built-in reader. */
+  onOpen: (paper: Paper) => void
 }) {
   const [filter, setFilter] = useState('')
+  const filterKey = `bookmarkFilter:${props.lineId}`
+  const [onlyBookmarked, setOnlyBookmarkedState] = useState(() => {
+    try {
+      return localStorage.getItem(filterKey) === '1'
+    } catch {
+      return false
+    }
+  })
+  const setOnlyBookmarked = (on: boolean) => {
+    setOnlyBookmarkedState(on)
+    try {
+      localStorage.setItem(filterKey, on ? '1' : '0')
+    } catch {}
+  }
+  const marked = useMemo(() => new Set(props.bookmarks), [props.bookmarks])
+  const star = (p: Paper) => (
+    <button
+      className={`star ${marked.has(p.id) ? 'on' : ''}`}
+      title={marked.has(p.id) ? 'Remove bookmark' : 'Bookmark this paper'}
+      aria-pressed={marked.has(p.id)}
+      onClick={() => props.onToggleBookmark(p.id)}
+    >
+      {marked.has(p.id) ? '★' : '☆'}
+    </button>
+  )
   const [open, setOpen] = useState<string | null>(null)
   const [textView, setTextView] = useState<{ title: string; text: string } | null>(null)
 
   const matching = useMemo(() => {
     const q = filter.trim().toLowerCase()
-    if (!q) return props.papers
-    return props.papers.filter((p) =>
-      `${p.title} ${p.authors.join(' ')} ${p.abstract} ${p.id}`.toLowerCase().includes(q)
+    return props.papers.filter(
+      (p) =>
+        (!onlyBookmarked || marked.has(p.id)) &&
+        (!q || `${p.title} ${p.authors.join(' ')} ${p.abstract} ${p.id}`.toLowerCase().includes(q))
     )
-  }, [filter, props.papers])
+  }, [filter, props.papers, onlyBookmarked, marked])
+  const bookmarkCount = props.papers.filter((p) => marked.has(p.id)).length
   const review = matching.filter((p) => p.status === 'review')
   const shown = matching.filter((p) => p.status !== 'review')
 
@@ -69,6 +101,14 @@ export default function PaperList(props: {
     <section className="papers">
       <div className="panel-head">
         <input className="search" placeholder="Filter papers…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <button
+          className={`btn small bookmark-filter ${onlyBookmarked ? 'primary' : ''}`}
+          aria-pressed={onlyBookmarked}
+          title="Show only bookmarked papers of this research line"
+          onClick={() => setOnlyBookmarked(!onlyBookmarked)}
+        >
+          ★ Bookmarked{bookmarkCount ? ` (${bookmarkCount})` : ''}
+        </button>
       </div>
       <div className="paper-scroll">
         {review.length > 0 && (
@@ -96,6 +136,7 @@ export default function PaperList(props: {
                 </div>
                 <p className="abstract">{p.abstract}</p>
                 <div className="paper-actions">
+                  {star(p)}
                   <button className="btn small primary" onClick={() => approve([p.id])}>
                     Approve
                   </button>
@@ -114,7 +155,13 @@ export default function PaperList(props: {
           </div>
         )}
         {shown.length === 0 && review.length === 0 && (
-          <p className="muted pad">{props.papers.length ? 'No papers match the filter.' : 'No papers yet — fetch some from arXiv or add one by hand.'}</p>
+          <p className="muted pad">
+            {onlyBookmarked && !bookmarkCount
+              ? 'No bookmarked papers in this research line yet — use the ☆ on a paper.'
+              : props.papers.length
+                ? 'No papers match the filter.'
+                : 'No papers yet — fetch some from arXiv or add one by hand.'}
+          </p>
         )}
         {shown.map((p) => {
           const expanded = open === p.id
@@ -135,6 +182,7 @@ export default function PaperList(props: {
                     {authorsShort(p.authors)} · {fmtDate(p.published)} · {paperRef(p)}
                   </span>
                 </button>
+                {star(p)}
                 <span className={`status ${p.status}`} title={p.error}>
                   {STATUS_LABEL[p.status]}
                 </span>
@@ -167,8 +215,11 @@ export default function PaperList(props: {
                     {p.chunkCount ? <span className="muted small">{p.chunkCount} chunks</span> : null}
                   </div>
                   <div className="paper-actions">
-                    <button className="btn small" onClick={() => api.openPdf(p.id)}>
-                      Open PDF
+                    <button className="btn small primary" onClick={() => props.onOpen(p)}>
+                      Read
+                    </button>
+                    <button className="btn small subtle" title="Open in your system's PDF viewer" onClick={() => api.openPdf(p.id)}>
+                      Open externally
                     </button>
                     {p.absUrl && (
                       <button className="btn small" onClick={() => api.openExternal(p.absUrl)}>

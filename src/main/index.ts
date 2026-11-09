@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { archiveExtension, exportData, extractArchive } from './archive'
 import { buildSearchQuery } from './arxiv'
 import { setModelCacheDir } from './embeddings'
@@ -12,9 +13,22 @@ import { inspectPdf } from './pdf'
 import { ask } from './rag'
 import { getSettings, initSettings, saveSettings } from './settings'
 import { Store } from './store'
-import type { AddPdfInput, ChatMessage, ExportOptions, ExportResult, ImportResult, NewLineInput, PdfCandidate, ResearchLine, Settings } from '../shared/types'
+import type { AddPdfInput, ChatMessage, ExportOptions, ExportResult, ImportResult, NewLineInput, PdfCandidate, ReaderState, ResearchLine, Settings } from '../shared/types'
 
 let win: BrowserWindow | null = null
+
+// betaxiv://paper/<id> serves a paper's PDF to the built-in reader and betaxiv://pdfjs/... the
+// font/CMap data pdf.js needs. Must be registered before the app is ready.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'betaxiv', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }
+])
+
+const PDFJS_DIRS = new Set(['cmaps', 'standard_fonts', 'wasm', 'iccs'])
+const reply = (body: Uint8Array | string | null, status: number, type = 'application/octet-stream') =>
+  new Response(body as ConstructorParameters<typeof Response>[0], {
+    status,
+    headers: { 'Content-Type': type, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' }
+  })
 
 function createWindow() {
   win = new BrowserWindow({
@@ -39,6 +53,28 @@ function createWindow() {
   win.webContents.on('will-navigate', (e, url) => {
     if (url !== win?.webContents.getURL()) e.preventDefault()
   })
+  // Closing waits (briefly) for the reader to write out unsaved annotations, notes and position.
+  const w = win
+  let flushed = false
+  w.on('close', (e) => {
+    if (flushed) return
+    e.preventDefault()
+    let timer: NodeJS.Timeout | undefined
+    const finish = () => {
+      if (flushed) return
+      flushed = true
+      clearTimeout(timer)
+      ipcMain.removeListener('app:flushed', onFlushed)
+      if (!w.isDestroyed()) w.close()
+    }
+    const onFlushed = (ev: Electron.IpcMainEvent) => {
+      if (ev.sender === w.webContents) finish()
+    }
+    ipcMain.on('app:flushed', onFlushed)
+    timer = setTimeout(finish, 3000)
+    if (w.webContents.isLoading() || w.webContents.isCrashed()) finish()
+    else w.webContents.send('app:before-close', null)
+  })
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else win.loadFile(path.join(__dirname, '../renderer/index.html'))
 }
@@ -60,6 +96,24 @@ app.whenReady().then(() => {
     papersChanged: (lineId) => send('papers:changed', lineId)
   }, workDir)
   const chatAborts = new Map<string, AbortController>()
+
+  const pdfjsRoot = path.dirname(createRequire(__filename).resolve('pdfjs-dist/package.json'))
+  protocol.handle('betaxiv', (req) => {
+    try {
+      const url = new URL(req.url)
+      const rel = decodeURIComponent(url.pathname.slice(1))
+      if (url.hostname === 'paper') {
+        const file = store.hasPaper(rel) ? store.pdfFile(rel) : null
+        return file ? reply(fs.readFileSync(file), 200, 'application/pdf') : reply('No PDF', 404)
+      }
+      if (url.hostname === 'pdfjs') {
+        const [dir, name, ...extra] = rel.split('/')
+        if (!PDFJS_DIRS.has(dir) || !name || extra.length || name.startsWith('.')) return reply('Not found', 404)
+        return reply(fs.readFileSync(path.join(pdfjsRoot, dir, name)), 200, name.endsWith('.wasm') ? 'application/wasm' : undefined)
+      }
+    } catch {}
+    return reply('Not found', 404)
+  })
 
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:save', (_e, s: Settings) => saveSettings(s))
@@ -152,9 +206,21 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('job:cancel', (_e, lineId: string) => pipeline.cancel(lineId))
   ipcMain.handle('papers:openPdf', async (_e, paperId: string) => {
-    const file = path.join(store.paperDir(paperId), 'paper.pdf')
-    if (fs.existsSync(file)) await shell.openPath(file)
+    const file = store.hasPaper(paperId) ? store.pdfFile(paperId) : null
+    if (file) await shell.openPath(file)
     else if (store.getPaper(paperId).pdfUrl) await shell.openExternal(store.getPaper(paperId).pdfUrl)
+  })
+  ipcMain.handle('reader:hasPdf', (_e, paperId: string) => store.hasPaper(paperId) && store.pdfFile(paperId) !== null)
+  ipcMain.handle('reader:state', (_e, paperId: string) => store.readerState(paperId))
+  ipcMain.handle('reader:saveState', (_e, paperId: string, state: ReaderState) => store.saveReaderState(paperId, state))
+  ipcMain.handle('reader:saveAnnotations', (_e, paperId: string, pdf: Uint8Array) => store.saveAnnotatedPdf(paperId, pdf))
+  ipcMain.handle('reader:notes', (_e, paperId: string) => store.notes(paperId))
+  ipcMain.handle('reader:saveNotes', (_e, paperId: string, text: string) => store.saveNotes(paperId, String(text ?? '')))
+  ipcMain.handle('bookmarks:list', (_e, lineId: string) => store.bookmarks(lineId))
+  ipcMain.handle('bookmarks:set', (_e, lineId: string, paperId: string, on: boolean) => {
+    const list = store.setBookmark(lineId, paperId, !!on)
+    send('papers:changed', lineId)
+    return list
   })
   ipcMain.handle('shell:openExternal', (_e, url: string) => {
     if (/^https:\/\/(arxiv\.org|export\.arxiv\.org)\//.test(url)) return shell.openExternal(url)

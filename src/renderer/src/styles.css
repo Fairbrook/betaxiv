@@ -162,15 +162,41 @@ code {
 }
 
 .line-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   width: 100%;
+  padding: 8px 6px 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 2px;
+}
+.line-main {
+  flex: 1;
+  min-width: 0;
+  display: block;
   text-align: left;
   border: 0;
   background: none;
-  padding: 8px 10px;
-  border-radius: 6px;
+  padding: 0;
   cursor: pointer;
-  margin-bottom: 2px;
+}
+.line-item.parent {
+  background: var(--chip);
+}
+.line-chevron {
+  flex: none;
+  border: 0;
+  background: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.line-chevron:hover {
+  background: var(--border);
+  color: var(--text);
 }
 .line-item:hover {
   background: var(--chip);
@@ -1052,6 +1078,16 @@ input[type='checkbox'] {
   place-items: center;
   padding: 6px 0;
 }
+.sidebar-collapsed .line-main {
+  display: grid;
+  place-items: center;
+}
+.sidebar-collapsed .line-item.parent {
+  background: none;
+}
+.sidebar-collapsed .line-item.parent .line-initial {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
 .line-initial {
   display: grid;
   place-items: center;
@@ -1095,4 +1131,283 @@ input[type='checkbox'] {
 }
 .modal-body .check {
   margin-bottom: 12px;
+}
+
+/* ---- paper tabs in the sidebar ---------------------------------------------------- */
+
+.pane {
+  display: contents;
+}
+.pane-hidden {
+  display: none;
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  margin: 0 0 2px 14px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  border-radius: 0 6px 6px 0;
+}
+.tab-item:hover {
+  background: var(--chip);
+}
+.tab-item.active {
+  background: var(--panel);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.tab-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 5px 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+.tab-icon {
+  flex: none;
+  font-size: 12px;
+  line-height: 1;
+}
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tab-item.active .tab-title {
+  font-weight: 550;
+}
+.tab-close {
+  flex: none;
+  border: 0;
+  background: none;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--muted);
+  opacity: 0;
+}
+.tab-item:hover .tab-close,
+.tab-item.active .tab-close,
+.tab-close:focus-visible {
+  opacity: 1;
+}
+.tab-close:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+/* ---- bookmarks --------------------------------------------------------------------- */
+
+.star {
+  flex: none;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--muted);
+}
+.star:hover {
+  color: var(--text);
+  background: var(--chip);
+}
+.star.on {
+  color: var(--warn);
+}
+.bookmark-filter {
+  flex: none;
+}
+.panel-head .search {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- reader ------------------------------------------------------------------------- */
+
+.reader {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.reader-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.reader-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.reader-group.find .search {
+  width: 170px;
+}
+.reader-toolbar .page-input {
+  width: 46px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 3px 4px;
+}
+.reader-zoom {
+  min-width: 52px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  border-radius: 5px;
+  padding: 2px 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.reader-zoom:hover:not(:disabled) {
+  background: var(--chip);
+  color: var(--text);
+}
+.modes {
+  gap: 2px;
+}
+.mode-btn {
+  border: 1px solid transparent;
+  background: none;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.mode-btn:hover:not(:disabled) {
+  background: var(--chip);
+  color: var(--text);
+}
+.mode-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.color-swatches {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+.color-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.color-swatch.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.save-status.error {
+  color: var(--err);
+}
+.save-status.saved {
+  color: var(--ok);
+}
+.bookmark-btn {
+  font-size: 15px;
+}
+.bookmark-btn.on {
+  color: var(--warn);
+}
+
+.reader-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.reader-main {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+/* pdf.js needs its scroll container to be absolutely positioned. */
+.reader-viewer {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--bg);
+}
+.reader-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  background: var(--bg);
+}
+.reader > .reader-overlay {
+  position: static;
+  flex: 1;
+}
+.reader-side {
+  flex: none;
+  width: clamp(280px, 34%, 440px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+}
+.reader-side > .chat {
+  flex: 1;
+}
+.notes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.notes textarea {
+  flex: 1;
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 14px 16px;
+  background: transparent;
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.55;
+}
+.notes-foot {
+  padding: 4px 16px 8px;
+  min-height: 24px;
+}
+
+/* In the reader's narrow side panel the composer stacks: text box on top, controls below. */
+.reader-side .composer {
+  flex-wrap: wrap;
+}
+.reader-side .composer textarea {
+  flex: 1 0 100%;
+}
+.reader-side .composer .model-switch {
+  flex: 1;
+  min-width: 0;
+  width: auto;
 }

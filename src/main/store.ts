@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { readJson, writeJson } from './fsutil'
-import type { ChatMessage, ImportResult, NewLineInput, Paper, PaperStatus, ResearchLine } from '../shared/types'
+import type { ChatMessage, ImportResult, NewLineInput, Paper, PaperStatus, ReaderState, ResearchLine } from '../shared/types'
 
 interface Library {
   version: 1
@@ -10,7 +10,12 @@ interface Library {
   papers: Record<string, Paper>
   /** Paper ids removed from each line, so fetching doesn't bring them back. */
   dismissed?: Record<string, string[]>
+  /** Bookmarked paper ids per research line. */
+  bookmarks?: Record<string, string[]>
 }
+
+/** Files in a paper's folder that hold the reader's per-paper data. */
+const USER_FILES = ['reader.json', 'notes.md', 'paper.annotated.pdf']
 
 /**
  * Local, file-based library:
@@ -19,6 +24,9 @@ interface Library {
  *   papers/<id>/paper.md         extracted, cleaned text
  *   papers/<id>/chunks.json      chunk texts + embedding metadata
  *   papers/<id>/embeddings.bin   Float32 embedding matrix (chunks x dim)
+ *   papers/<id>/reader.json      where the reader left off (page, scroll, zoom)
+ *   papers/<id>/paper.annotated.pdf  the PDF with your highlights/text/drawings saved in
+ *   papers/<id>/notes.md         your notes on the paper
  *   chats/<lineId>.json          chat history per research line
  */
 export class Store {
@@ -87,6 +95,7 @@ export class Store {
     }
     fs.rmSync(this.chatFile(id), { force: true })
     delete this.lib.dismissed?.[id]
+    delete this.lib.bookmarks?.[id]
     this.save()
   }
 
@@ -150,6 +159,7 @@ export class Store {
     const dismissed = (this.lib.dismissed ??= {})
     const list = (dismissed[lineId] ??= [])
     if (!list.includes(paperId)) list.push(paperId)
+    this.dropBookmark(paperId, lineId)
     const p = this.lib.papers[paperId]
     let deleted = false
     if (p) {
@@ -162,6 +172,99 @@ export class Store {
     }
     this.save()
     return deleted
+  }
+
+  // ---- bookmarks ------------------------------------------------------------
+
+  bookmarks(lineId: string): string[] {
+    return [...(this.lib.bookmarks?.[lineId] ?? [])]
+  }
+
+  /** Bookmark (or un-bookmark) a paper within one research line. Returns the line's bookmarks. */
+  setBookmark(lineId: string, paperId: string, on: boolean): string[] {
+    this.getLine(lineId)
+    if (on && !this.getPaper(paperId).lineIds.includes(lineId)) throw new Error('That paper is not in this research line')
+    if (on) {
+      const list = ((this.lib.bookmarks ??= {})[lineId] ??= [])
+      if (!list.includes(paperId)) list.push(paperId)
+      this.save()
+    } else this.dropBookmark(paperId, lineId, true)
+    return this.bookmarks(lineId)
+  }
+
+  private dropBookmark(paperId: string, lineId: string, save = false): void {
+    const list = this.lib.bookmarks?.[lineId]
+    if (!list?.includes(paperId)) return
+    list.splice(list.indexOf(paperId), 1)
+    if (!list.length) delete this.lib.bookmarks![lineId]
+    if (save) this.save()
+  }
+
+  // ---- reader: position, annotations, notes ---------------------------------
+
+  /** The PDF the reader should show: your annotated copy if there is one, else the original. */
+  pdfFile(id: string): string | null {
+    const dir = this.knownPaperDir(id)
+    for (const name of ['paper.annotated.pdf', 'paper.pdf']) {
+      const file = path.join(dir, name)
+      if (fs.existsSync(file)) return file
+    }
+    return null
+  }
+
+  readerState(id: string): ReaderState | null {
+    const s = readJson<Partial<ReaderState> | null>(path.join(this.knownPaperDir(id), 'reader.json'), null)
+    if (!s || !Number.isInteger(s.page) || (s.page as number) < 1) return null
+    return {
+      page: s.page as number,
+      top: typeof s.top === 'number' ? s.top : null,
+      left: typeof s.left === 'number' ? s.left : null,
+      scale: typeof s.scale === 'string' && s.scale ? s.scale : 'page-width',
+      updatedAt: typeof s.updatedAt === 'string' ? s.updatedAt : ''
+    }
+  }
+
+  saveReaderState(id: string, state: ReaderState): void {
+    const dir = this.knownPaperDir(id)
+    if (!fs.existsSync(dir)) return // paper was deleted while the reader was open
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+    writeJson(path.join(dir, 'reader.json'), {
+      page: Math.max(1, Math.floor(Number(state.page)) || 1),
+      top: num(state.top),
+      left: num(state.left),
+      scale: String(state.scale || 'page-width').slice(0, 20),
+      updatedAt: new Date().toISOString()
+    } satisfies ReaderState)
+  }
+
+  /** Save the annotated copy of the PDF. The original paper.pdf is left alone. */
+  saveAnnotatedPdf(id: string, data: Uint8Array): void {
+    const dir = this.knownPaperDir(id)
+    if (!fs.existsSync(dir)) return
+    if (new TextDecoder().decode(data.slice(0, 5)) !== '%PDF-') throw new Error('Not a PDF')
+    const file = path.join(dir, 'paper.annotated.pdf')
+    const tmp = `${file}.${process.pid}.tmp`
+    fs.writeFileSync(tmp, data)
+    fs.renameSync(tmp, file)
+  }
+
+  notes(id: string): string {
+    const dir = this.knownPaperDir(id)
+    try {
+      return fs.readFileSync(path.join(dir, 'notes.md'), 'utf8')
+    } catch {
+      return ''
+    }
+  }
+
+  saveNotes(id: string, text: string): void {
+    const dir = this.knownPaperDir(id)
+    if (!fs.existsSync(dir)) return
+    const file = path.join(dir, 'notes.md')
+    if (!text.trim()) return void fs.rmSync(file, { force: true })
+    const tmp = `${file}.${process.pid}.tmp`
+    fs.writeFileSync(tmp, text)
+    fs.renameSync(tmp, file)
   }
 
   // ---- import ---------------------------------------------------------------
@@ -202,8 +305,14 @@ export class Store {
       cur.lineIds.push(...added)
       if (added.length) result.linked++
       if (cur.status !== 'indexed' && !busy(cur.status) && status === 'indexed' && fs.existsSync(from)) {
-        fs.rmSync(this.paperDir(p.id), { recursive: true, force: true })
-        this.moveDir(from, this.paperDir(p.id))
+        // Keep what you made here (reading position, notes, annotations) over the imported copy's.
+        const mineDir = this.paperDir(p.id)
+        for (const name of USER_FILES) {
+          const mine = path.join(mineDir, name)
+          if (fs.existsSync(mine)) fs.copyFileSync(mine, path.join(from, name))
+        }
+        fs.rmSync(mineDir, { recursive: true, force: true })
+        this.moveDir(from, mineDir)
         Object.assign(cur, { ...p, lineIds: cur.lineIds, addedAt: cur.addedAt, status })
         delete cur.error
         result.updated++
@@ -216,6 +325,15 @@ export class Store {
       for (const id of list) {
         if (typeof id === 'string' && !mine.includes(id) && !this.lib.papers[id]?.lineIds.includes(lineId)) mine.push(id)
       }
+    }
+
+    for (const [lineId, list] of Object.entries(other.bookmarks ?? {})) {
+      if (!lineIds.has(lineId) || !Array.isArray(list)) continue
+      const mine = ((this.lib.bookmarks ??= {})[lineId] ??= [])
+      for (const id of list) {
+        if (typeof id === 'string' && !mine.includes(id) && this.lib.papers[id]?.lineIds.includes(lineId)) mine.push(id)
+      }
+      if (!mine.length) delete this.lib.bookmarks![lineId]
     }
 
     for (const lineId of lineIds) {
@@ -233,6 +351,12 @@ export class Store {
     this.moveMissing(path.join(src, 'models'), path.join(this.root, 'models'))
     this.save()
     return result
+  }
+
+  /** A paper's folder; throws for ids that aren't in the library. */
+  private knownPaperDir(id: string): string {
+    this.getPaper(id)
+    return this.paperDir(id)
   }
 
   private dirName(id: string): string {
